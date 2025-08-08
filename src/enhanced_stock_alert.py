@@ -38,6 +38,9 @@ class EnhancedStockPredictor:
         # Load configuration
         self.config = self.load_config(config_file)
         
+        # Update logging configuration from config
+        self.update_logging_from_config()
+        
         # Initialize components
         self.ticker = self.config['ticker'].upper()
         self.lookback_days = self.config['lookback_days']
@@ -69,25 +72,11 @@ class EnhancedStockPredictor:
             logger.info(f"Configuration loaded from {config_file}")
             return config
         except FileNotFoundError:
-            logger.warning(f"Config file {config_file} not found, using defaults")
-            return {
-                "ticker": "META",
-                "lookback_days": 60,
-                "prediction_hours": 4,
-                "alert_time": "12:00",
-                "buy_threshold": 1.0,
-                "sell_threshold": -1.0,
-                "confidence_threshold": 0.7,
-                "training_epochs": 100,
-                "batch_size": 32,
-                "learning_rate": 0.0001,
-                "enable_sentiment_analysis": True,
-                "enable_technical_indicators": True,
-                "log_level": "INFO",
-                "save_alerts_to_file": True,
-                "alert_file": "trading_alerts.txt",
-                "log_file": "stock_alerts.log"
-            }
+            logger.error(f"Config file {config_file} not found. Please ensure the config.json file exists in the project root.")
+            raise FileNotFoundError(f"Config file {config_file} not found. Please create a config.json file with the required settings.")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in config file {config_file}: {str(e)}")
+            raise ValueError(f"Invalid JSON format in config file: {str(e)}")
         except Exception as e:
             logger.error(f"Error loading config: {str(e)}")
             raise
@@ -107,6 +96,30 @@ class EnhancedStockPredictor:
         )
         global logger
         logger = logging.getLogger(__name__)
+    
+    def update_logging_from_config(self):
+        """Update logging configuration after config is loaded"""
+        try:
+            if hasattr(self, 'config') and 'log_level' in self.config:
+                log_level = getattr(logging, self.config['log_level'].upper(), logging.INFO)
+                logger.setLevel(log_level)
+                
+                # Update log file if specified
+                if 'log_file' in self.config:
+                    # Remove existing file handler and add new one
+                    for handler in logger.handlers[:]:
+                        if isinstance(handler, logging.FileHandler):
+                            logger.removeHandler(handler)
+                    
+                    file_handler = logging.FileHandler(self.config['log_file'])
+                    file_handler.setLevel(log_level)
+                    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+                    file_handler.setFormatter(formatter)
+                    logger.addHandler(file_handler)
+                    
+                logger.info(f"Logging updated to level: {self.config['log_level']}")
+        except Exception as e:
+            logger.warning(f"Failed to update logging from config: {str(e)}")
     
     def init_reddit_client(self) -> Optional[dict]:
         """Initialize Reddit client using the logic from the notebook"""
@@ -334,7 +347,9 @@ class EnhancedStockPredictor:
                 return self.get_dummy_sentiment_data()
             
             news_data = []
-            for article in news[:50]:  # Limit to 50 articles
+            # Use config value for news article limit, default to 50
+            news_limit = self.config.get('news_article_limit', 50)
+            for article in news[:news_limit]:  # Limit to N articles
                 try:
                     title = article.get('title', '')
                     if not title:
@@ -377,7 +392,9 @@ class EnhancedStockPredictor:
     
     def get_dummy_sentiment_data(self) -> pd.DataFrame:
         """Generate dummy sentiment data for testing"""
-        dates = pd.date_range(start=datetime.now() - timedelta(days=30), 
+        # Use config lookback_days if available, otherwise default to 30
+        days = getattr(self, 'config', {}).get('lookback_days', 30)
+        dates = pd.date_range(start=datetime.now() - timedelta(days=days), 
                             end=datetime.now(), freq='D')
         
         return pd.DataFrame({
@@ -404,7 +421,9 @@ class EnhancedStockPredictor:
             # Method 1: Try with specific date range
             try:
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=days + 30)  # Get extra days for safety
+                # Get extra days for safety - use config value or default to 30
+                extra_days = self.config.get('extra_days_for_safety', 30)
+                start_date = end_date - timedelta(days=days + extra_days)
                 
                 data = yf.download(
                     self.ticker, 
@@ -422,7 +441,7 @@ class EnhancedStockPredictor:
                 try:
                     data = yf.download(
                         self.ticker, 
-                        period=f"{days + 30}d",
+                        period=f"{days + extra_days}d",
                         progress=False,
                         auto_adjust=True
                     )
@@ -435,7 +454,7 @@ class EnhancedStockPredictor:
                 try:
                     data = yf.download(
                         self.ticker, 
-                        period="1y",
+                        period=self.config.get('fallback_period', "1y"),
                         progress=False,
                         auto_adjust=True
                     )
@@ -453,8 +472,10 @@ class EnhancedStockPredictor:
             # Remove any rows with NaN values
             data = data.dropna()
             
-            if len(data) < 30:  # Minimum required data
-                raise ValueError(f"Insufficient historical data for {self.ticker}. Only {len(data)} days available.")
+            # Minimum required data - use config value or default to 30
+            min_required_days = self.config.get('min_required_days', 30)
+            if len(data) < min_required_days:
+                raise ValueError(f"Insufficient historical data for {self.ticker}. Only {len(data)} days available, need at least {min_required_days}.")
             
             # Add technical indicators if enabled
             if self.config.get('enable_technical_indicators', True):
@@ -665,8 +686,10 @@ class EnhancedStockPredictor:
             # Prepare data
             X, y = self.prepare_data(stock_data, sentiment_data)
             
-            if len(X) < 50:  # Reduced minimum requirement
-                raise ValueError(f"Insufficient data for training. Only {len(X)} samples available, need at least 50.")
+            # Minimum training samples - use config value or default to 50
+            min_training_samples = self.config.get('min_training_samples', 50)
+            if len(X) < min_training_samples:
+                raise ValueError(f"Insufficient data for training. Only {len(X)} samples available, need at least {min_training_samples}.")
             
             logger.info(f"Prepared {len(X)} training samples with {X.shape[1]} features")
             
@@ -723,8 +746,9 @@ class EnhancedStockPredictor:
             
             # Method 1: Try to get the most recent close price directly
             try:
-                # Get the last 5 days of data to ensure we have recent data
-                data = yf.download(self.ticker, period="5d", progress=False)
+                # Get the last N days of data to ensure we have recent data
+                current_price_days = self.config.get('current_price_days', 5)
+                data = yf.download(self.ticker, period=f"{current_price_days}d", progress=False)
                 if not data.empty and len(data) > 0:
                     current_price = data['Close'].iloc[-1]
                     logger.info(f"Got current price from recent data: ${current_price:.2f}")
@@ -748,7 +772,9 @@ class EnhancedStockPredictor:
             
             # Method 3: Try with different parameters
             try:
-                data = yf.download(self.ticker, start=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'), 
+                # Use config value for date range fallback
+                date_range_days = self.config.get('date_range_days', 7)
+                data = yf.download(self.ticker, start=(datetime.now() - timedelta(days=date_range_days)).strftime('%Y-%m-%d'), 
                                  end=datetime.now().strftime('%Y-%m-%d'), progress=False)
                 if not data.empty and len(data) > 0:
                     current_price = data['Close'].iloc[-1]
@@ -770,13 +796,17 @@ class EnhancedStockPredictor:
             logger.info(f"Predicting future price for {self.ticker}...")
             
             # Get recent historical data
-            stock_data = self.get_historical_data(days=30)
+            stock_data = self.get_historical_data(days=self.config['lookback_days'])
             
-            if stock_data.empty or len(stock_data) < 5:
-                raise ValueError("Insufficient historical data for prediction")
+            # Minimum data for prediction - use config value or default to 5
+            min_prediction_days = self.config.get('min_prediction_days', 5)
+            if stock_data.empty or len(stock_data) < min_prediction_days:
+                raise ValueError(f"Insufficient historical data for prediction. Need at least {min_prediction_days} days.")
             
             # Use more conservative prediction methods
-            recent_prices = stock_data['Close'].tail(20).values  # Last 20 days for better stability
+            # Use config value for recent days analysis, default to 20
+            recent_days = self.config.get('recent_days_for_prediction', 20)
+            recent_prices = stock_data['Close'].tail(recent_days).values  # Last N days for better stability
             
             # Calculate various technical indicators
             current_price = recent_prices[-1]
@@ -847,8 +877,10 @@ class EnhancedStockPredictor:
             # Conservative fallback
             try:
                 logger.info("Using conservative fallback prediction...")
-                stock_data = self.get_historical_data(days=5)
-                if not stock_data.empty and len(stock_data) >= 2:
+                stock_data = self.get_historical_data(days=self.config.get('fallback_days', 5))
+                # Minimum data for fallback prediction - use config value or default to 2
+                min_fallback_days = self.config.get('min_fallback_days', 2)
+                if not stock_data.empty and len(stock_data) >= min_fallback_days:
                     current_price = stock_data['Close'].iloc[-1]
                     # Very conservative random change (±0.5%)
                     import random
@@ -989,10 +1021,12 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         """Get detailed market analysis with technical indicators"""
         try:
             # Get recent historical data
-            stock_data = self.get_historical_data(days=20)
+            stock_data = self.get_historical_data(days=min(20, self.config['lookback_days']))
             
-            if stock_data.empty or len(stock_data) < 10:
-                return "Insufficient data for technical analysis"
+            # Minimum data for technical analysis - use config value or default to 10
+            min_analysis_days = self.config.get('min_analysis_days', 10)
+            if stock_data.empty or len(stock_data) < min_analysis_days:
+                return f"Insufficient data for technical analysis. Need at least {min_analysis_days} days."
             
             current_price = stock_data['Close'].iloc[-1]
             
@@ -1052,7 +1086,9 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             
             # Reddit sentiment
             try:
-                reddit_sentiment = self.get_ticker_specific_sentiment(limit=50)
+                # Use config value for sentiment analysis limit, default to 50
+                sentiment_limit = self.config.get('sentiment_analysis_limit', 50)
+                reddit_sentiment = self.get_ticker_specific_sentiment(limit=sentiment_limit)
                 if not reddit_sentiment.empty and len(reddit_sentiment) > 0:
                     avg_polarity = reddit_sentiment['avg_polarity'].mean()
                     total_posts = reddit_sentiment['total_volume'].sum()
