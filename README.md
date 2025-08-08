@@ -142,7 +142,7 @@ python src/real_time_stock_alert.py
 ## Sentiment Analysis
 
 ### Reddit Sentiment
-- Analyzes posts from r/wallstreetbets, r/stocks, r/investing
+- Analyzes posts from r/stocks, r/investing
 - Searches for mentions of the target stock
 - Calculates weighted sentiment scores
 - Considers upvotes, comments, and post scores

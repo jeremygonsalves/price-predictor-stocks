@@ -263,7 +263,7 @@ class EnhancedStockPredictor:
             headers = self.reddit_client['headers']
             
             # Search for posts mentioning the ticker across multiple subreddits
-            subreddits = ['wallstreetbets', 'stocks', 'investing']
+            subreddits = ['stocks', 'investing']
             
             for subreddit_name in subreddits:
                 try:
@@ -803,6 +803,31 @@ class EnhancedStockPredictor:
             if stock_data.empty or len(stock_data) < min_prediction_days:
                 raise ValueError(f"Insufficient historical data for prediction. Need at least {min_prediction_days} days.")
             
+            # Get sentiment data for prediction
+            sentiment_impact = 0.0
+            if self.config.get('enable_sentiment_analysis', True):
+                try:
+                    # Get Reddit sentiment
+                    reddit_sentiment = self.get_ticker_specific_sentiment(limit=50)
+                    if not reddit_sentiment.empty and len(reddit_sentiment) > 0:
+                        reddit_polarity = reddit_sentiment['avg_polarity'].mean()
+                        reddit_impact = reddit_polarity * 0.05  # 5% max impact
+                        sentiment_impact += reddit_impact
+                        logger.info(f"Reddit sentiment impact: {reddit_impact:.4f}")
+                    
+                    # Get news sentiment
+                    news_sentiment = self.get_news_sentiment()
+                    if not news_sentiment.empty and len(news_sentiment) > 0:
+                        news_polarity = news_sentiment['avg_polarity'].mean()
+                        news_impact = news_polarity * 0.03  # 3% max impact
+                        sentiment_impact += news_impact
+                        logger.info(f"News sentiment impact: {news_impact:.4f}")
+                    
+                    logger.info(f"Total sentiment impact: {sentiment_impact:.4f}")
+                except Exception as e:
+                    logger.warning(f"Error calculating sentiment impact: {str(e)}")
+                    sentiment_impact = 0.0
+            
             # Use more conservative prediction methods
             # Use config value for recent days analysis, default to 20
             recent_days = self.config.get('recent_days_for_prediction', 20)
@@ -848,8 +873,8 @@ class EnhancedStockPredictor:
             # RSI factor: Overbought/oversold adjustment
             rsi_adjustment = (rsi_factor - 0.5) * 0.02  # Small RSI adjustment
             
-            # Combine all factors for a realistic prediction
-            prediction_change = (trend_factor + momentum_factor + volatility_factor + rsi_adjustment)
+            # Combine all factors for a realistic prediction (now including sentiment)
+            prediction_change = (trend_factor + momentum_factor + volatility_factor + rsi_adjustment + sentiment_impact)
             
             # Apply very conservative bounds (±2% for daily prediction)
             prediction_change = max(-0.02, min(0.02, prediction_change))
@@ -867,6 +892,7 @@ class EnhancedStockPredictor:
             logger.info(f"Volatility: {volatility:.4f}")
             logger.info(f"RSI factor: {rsi_factor:.4f}")
             logger.info(f"Trend: {trend_factor:.4f}, Momentum: {momentum_factor:.4f}")
+            logger.info(f"Sentiment impact: {sentiment_impact:.4f}")
             logger.info(f"Final prediction: ${predicted_price:.2f} ({prediction_change:+.4f})")
             
             return predicted_price
