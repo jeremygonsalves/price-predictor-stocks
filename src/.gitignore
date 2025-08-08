@@ -1,5 +1,7 @@
 venv
+.venv
 client_id.txt
 client_secret.txt
 pw.txt
 alphavantage.txt
+/Users/jeremygonsalves/Documents/GitHub/stock-prediction/price-predictor-stocks/.venv

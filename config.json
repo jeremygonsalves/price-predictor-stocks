@@ -1,0 +1,18 @@
+{
+    "ticker": "NVDA",
+    "lookback_days": 60,
+    "prediction_hours": 4,
+    "alert_time": "12:00",
+    "buy_threshold": 1.0,
+    "sell_threshold": -1.0,
+    "confidence_threshold": 0.5,
+    "training_epochs": 100,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "enable_sentiment_analysis": true,
+    "enable_technical_indicators": true,
+    "log_level": "INFO",
+    "save_alerts_to_file": true,
+    "alert_file": "trading_alerts.txt",
+    "log_file": "stock_alerts.log"
+} 
