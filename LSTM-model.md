@@ -116,35 +116,35 @@ flowchart LR
     A --> E[Bollinger Bands]
     A --> F[Volume Analysis]
     
-    B --> B1[MA5: 5-day average]
-    B --> B2[MA10: 10-day average]
-    B --> B3[MA20: 20-day average]
-    B --> B4[MA50: 50-day average]
-    B --> B5[MA200: 200-day average]
+    B --> B1["MA5: 5-day average"]
+    B --> B2["MA10: 10-day average"]
+    B --> B3["MA20: 20-day average"]
+    B --> B4["MA50: 50-day average"]
+    B --> B5["MA200: 200-day average"]
     
     C --> C1[Calculate gains & losses]
-    C1 --> C2[14-day average gain]
-    C1 --> C3[14-day average loss]
-    C2 --> C4[RS = Avg Gain / Avg Loss]
+    C1 --> C2["14-day average gain"]
+    C1 --> C3["14-day average loss"]
+    C2 --> C4["RS = Avg Gain / Avg Loss"]
     C3 --> C4
-    C4 --> C5[RSI = 100 - 100/(1+RS)]
+    C4 --> C5["RSI = 100 - 100/(1+RS)"]
     
-    D --> D1[12-day EMA]
-    D --> D2[26-day EMA]
-    D1 --> D3[MACD = EMA12 - EMA26]
+    D --> D1["12-day EMA"]
+    D --> D2["26-day EMA"]
+    D1 --> D3["MACD = EMA12 - EMA26"]
     D2 --> D3
-    D3 --> D4[Signal = 9-day EMA of MACD]
-    D4 --> D5[Histogram = MACD - Signal]
+    D3 --> D4["Signal = 9-day EMA of MACD"]
+    D4 --> D5["Histogram = MACD - Signal"]
     
-    E --> E1[20-day SMA]
+    E --> E1["20-day SMA"]
     E1 --> E2[Standard Deviation]
-    E2 --> E3[Upper Band = SMA + 2*SD]
-    E2 --> E4[Lower Band = SMA - 2*SD]
-    E3 --> E5[BB Position = Price - Lower / Upper - Lower]
+    E2 --> E3["Upper Band = SMA + 2*SD"]
+    E2 --> E4["Lower Band = SMA - 2*SD"]
+    E3 --> E5["BB Position = Price - Lower / Upper - Lower"]
     E4 --> E5
     
-    F --> F1[Volume MA: 20-day average]
-    F1 --> F2[Volume Ratio = Current / Average]
+    F --> F1["Volume MA: 20-day average"]
+    F1 --> F2["Volume Ratio = Current / Average"]
     F2 --> F3[Volume Price Trend]
     
     classDef indicator fill:#e3f2fd
@@ -168,7 +168,7 @@ flowchart TD
     B1 --> B2[Filter by Ticker Mention]
     B2 --> B3[Analyze Title Sentiment]
     B2 --> B4[Analyze Body Sentiment]
-    B3 --> B5[Weighted Sentiment: 70% Title + 30% Body]
+    B3 --> B5["Weighted Sentiment: 70% Title + 30% Body"]
     B4 --> B5
     B5 --> B6[Aggregate Daily Sentiment]
     
@@ -208,17 +208,17 @@ flowchart TD
     A --> E[Calculate RSI Factor]
     
     B --> B1[MA5 vs MA20 Comparison]
-    B1 --> B2[Trend Factor = MA5-MA20/MA20 * 0.1]
+    B1 --> B2["Trend Factor = MA5-MA20/MA20 * 0.1"]
     
     C --> C1[Daily Returns Calculation]
     C1 --> C2[Average Daily Return]
-    C2 --> C3[Momentum Factor = Avg Return * 2]
+    C2 --> C3["Momentum Factor = Avg Return * 2"]
     
     D --> D1[Standard Deviation of Returns]
-    D1 --> D2[Volatility Factor = SD * 0.05]
+    D1 --> D2["Volatility Factor = SD * 0.05"]
     
     E --> E1[Gains vs Losses Analysis]
-    E1 --> E2[RSI Factor = Normalized RSI * 0.02]
+    E1 --> E2["RSI Factor = Normalized RSI * 0.02"]
     
     B2 --> F[Combine All Factors]
     C3 --> F

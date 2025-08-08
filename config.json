@@ -14,5 +14,18 @@
     "log_level": "INFO",
     "save_alerts_to_file": true,
     "alert_file": "trading_alerts.txt",
-    "log_file": "stock_alerts.log"
+    "log_file": "stock_alerts.log",
+    "min_required_days": 20,
+    "min_training_samples": 30,
+    "min_prediction_days": 5,
+    "min_fallback_days": 2,
+    "min_analysis_days": 10,
+    "extra_days_for_safety": 20,
+    "fallback_period": "1y",
+    "current_price_days": 5,
+    "date_range_days": 7,
+    "recent_days_for_prediction": 15,
+    "fallback_days": 5,
+    "sentiment_analysis_limit": 50,
+    "news_article_limit": 50
 } 
