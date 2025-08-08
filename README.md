@@ -6,6 +6,7 @@ A sophisticated real-time stock prediction system that provides buy/sell recomme
 
 - **Real-time Predictions**: Predicts stock prices 4 hours ahead
 - **Automated Alerts**: Sends buy/sell signals at 12pm daily
+- **Morning Stock Analysis**: Identifies top stocks to watch at 8:30 AM daily
 - **Sentiment Analysis**: Integrates Reddit and news sentiment data
 - **Technical Indicators**: Uses comprehensive technical analysis
 - **LSTM Neural Networks**: Advanced deep learning for price prediction
@@ -178,6 +179,63 @@ python src/real_time_stock_alert.py
 2024-01-15 12:00:08 - INFO - Daily analysis completed for NVDA
 ```
 
+## Morning Stock Analysis
+
+The system now includes a comprehensive morning stock analysis feature that runs at 8:30 AM every weekday. This feature analyzes news from multiple sources to identify the top stocks to watch for the day.
+
+### Features
+- **Multi-Source News Analysis**: Reddit, Alpha Vantage, and Yahoo Finance
+- **Time-Based Analysis**: Analyzes news from 4 PM previous day to 8 AM current day
+- **Sentiment Scoring**: Combines news sentiment with price momentum
+- **Automated Scheduling**: Runs automatically at 8:30 AM weekdays
+- **Slack Integration**: Sends detailed reports to Slack
+- **Comprehensive Scoring**: Considers news volume, sentiment, engagement, and price movement
+
+### Usage
+
+```bash
+# Run morning analysis once
+python src/morning_stock_analysis.py --run-once
+
+# Schedule daily analysis at 8:30 AM
+python src/morning_stock_analysis.py --schedule
+
+# Using the python runner script
+./python_runner.sh morning_analysis
+
+# Add to crontab manually (8:30 AM weekdays)
+# crontab -e
+# Add: 30 8 * * 1-5 /Users/jeremygonsalves/python_runner.sh morning_analysis >> /Users/jeremygonsalves/morning_analysis.log 2>&1
+```
+
+### Sample Output
+```
+🚀 MORNING STOCK ANALYSIS REPORT 🚀
+📅 Analysis Date: 2024-01-15 08:30
+⏰ Time Range: 01/14 16:00 - 01/15 08:00
+📊 Stocks Analyzed: 45
+📈 Stocks with Sufficient News: 12
+
+🔥 TOP STOCKS TO WATCH TODAY 🔥
+
+1. NVDA (Score: 8.45)
+   💰 Price: $145.67 (📈 +2.34%)
+   🏢 Sector: Technology
+   📰 News Count: 15
+   😊 Sentiment: 0.67
+   💡 Reason: 15 news mentions; positive sentiment (0.67); high Reddit engagement (245)
+   📋 Top Headlines:
+      • NVIDIA Announces New AI Chip Breakthrough
+      • Analysts Upgrade NVDA Price Targets
+      • Reddit Users Bullish on NVIDIA's Future
+```
+
+### Configuration
+The morning analysis uses the same configuration file (`config.json`) and environment variables as the main system. Make sure to set up:
+- `ALPHA_VANTAGE_API_KEY`: For Alpha Vantage news API
+- `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`: For Reddit sentiment analysis
+- `SLACK_WEBHOOK_URL`: For Slack notifications
+
 ## File Structure
 
 ```
@@ -185,13 +243,16 @@ price-predictor-stocks/
 ├── src/
 │   ├── real_time_stock_alert.py      # Basic version
 │   ├── enhanced_stock_alert.py       # Enhanced version (recommended)
+│   ├── morning_stock_analysis.py     # Morning stock analysis
 │   └── stock-price.ipynb             # Original notebook
 ├── config.json                       # Configuration file
 ├── requirements.txt                  # Python dependencies
 ├── setup.py                         # Setup script
+├── test_morning_analysis.py         # Test script for morning analysis
 ├── reddit_credentials.json          # Reddit API credentials (optional)
 ├── trading_alerts.txt               # Alert history
 ├── stock_alerts.log                 # System logs
+├── morning_stock_analysis.txt       # Morning analysis reports
 └── README.md                        # This file
 ```
 

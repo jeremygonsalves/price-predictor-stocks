@@ -27,5 +27,33 @@
     "recent_days_for_prediction": 15,
     "fallback_days": 5,
     "sentiment_analysis_limit": 50,
-    "news_article_limit": 50
+    "news_article_limit": 50,
+    "use_enhanced_prediction": true,
+    "intraday_interval": "5m",
+    "intraday_days": 5,
+    "ensemble_weights": {
+        "technical_analysis": 0.4,
+        "sentiment_based": 0.25,
+        "microstructure": 0.2,
+        "mean_reversion": 0.15
+    },
+    "real_time_sentiment": {
+        "enable_news_sentiment": true,
+        "enable_social_sentiment": true,
+        "enable_earnings_impact": true,
+        "enable_analyst_impact": true,
+        "enable_options_flow": true,
+        "sentiment_hours": 4
+    },
+    "microstructure_features": {
+        "enable_spread_analysis": true,
+        "enable_volume_analysis": true,
+        "enable_market_efficiency": true,
+        "enable_time_based_adjustments": true
+    },
+    "prediction_bounds": {
+        "max_daily_change": 0.02,
+        "max_intraday_change": 0.015,
+        "confidence_dampening": 0.5
+    }
 } 

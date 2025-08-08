@@ -791,9 +791,22 @@ class EnhancedStockPredictor:
             return 0
     
     def predict_future_price(self) -> float:
-        """Predict the stock price using realistic, conservative methods"""
+        """Predict the stock price using enhanced ensemble methods"""
         try:
-            logger.info(f"Predicting future price for {self.ticker}...")
+            # Use enhanced prediction if enabled
+            if self.config.get('use_enhanced_prediction', True):
+                return self.predict_future_price_enhanced()
+            else:
+                return self._legacy_prediction()
+                
+        except Exception as e:
+            logger.error(f"Error in predict_future_price: {str(e)}")
+            return self._legacy_prediction()
+    
+    def _legacy_prediction(self) -> float:
+        """Legacy prediction method for fallback"""
+        try:
+            logger.info(f"Using legacy prediction for {self.ticker}...")
             
             # Get recent historical data
             stock_data = self.get_historical_data(days=self.config['lookback_days'])
@@ -898,7 +911,7 @@ class EnhancedStockPredictor:
             return predicted_price
             
         except Exception as e:
-            logger.error(f"Error predicting future price: {str(e)}")
+            logger.error(f"Error in legacy prediction: {str(e)}")
             
             # Conservative fallback
             try:
@@ -1228,6 +1241,714 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 'predicted_price': 0,
                 'confidence': 0.0
             })
+
+    def get_intraday_data(self, interval: str = "5m", days: int = 5) -> pd.DataFrame:
+        """Fetch intraday stock data for more precise 4-hour predictions"""
+        try:
+            logger.info(f"Fetching {interval} intraday data for {self.ticker}")
+            
+            # Get intraday data
+            data = yf.download(
+                self.ticker,
+                period=f"{days}d",
+                interval=interval,
+                progress=False,
+                auto_adjust=True
+            )
+            
+            if data.empty:
+                logger.warning(f"No intraday data available for {self.ticker}")
+                return pd.DataFrame()
+            
+            # Reset index and rename columns
+            data.reset_index(inplace=True)
+            data.columns = ['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']
+            
+            # Add intraday-specific technical indicators
+            data = self.add_intraday_indicators(data)
+            
+            logger.info(f"Successfully fetched {len(data)} {interval} intervals for {self.ticker}")
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error fetching intraday data: {str(e)}")
+            return pd.DataFrame()
+    
+    def add_intraday_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Add intraday-specific technical indicators"""
+        # Intraday moving averages (shorter periods)
+        data['MA_3'] = data['Close'].rolling(window=3).mean()
+        data['MA_5'] = data['Close'].rolling(window=5).mean()
+        data['MA_10'] = data['Close'].rolling(window=10).mean()
+        data['MA_20'] = data['Close'].rolling(window=20).mean()
+        
+        # Intraday RSI (shorter period)
+        delta = data['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=7).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=7).mean()
+        rs = gain / loss
+        data['RSI_Intraday'] = 100 - (100 / (1 + rs))
+        
+        # Price momentum (intraday)
+        data['Price_Change_1'] = data['Close'].pct_change()
+        data['Price_Change_3'] = data['Close'].pct_change(periods=3)
+        data['Price_Change_5'] = data['Close'].pct_change(periods=5)
+        
+        # Volume analysis (intraday)
+        data['Volume_MA_5'] = data['Volume'].rolling(window=5).mean()
+        data['Volume_Ratio_Intraday'] = data['Volume'] / data['Volume_MA_5']
+        
+        # Intraday volatility
+        data['High_Low_Range'] = (data['High'] - data['Low']) / data['Close']
+        data['Volatility_Intraday'] = data['High_Low_Range'].rolling(window=10).mean()
+        
+        # Time-based features
+        data['Hour'] = pd.to_datetime(data['Datetime']).dt.hour
+        data['Minute'] = pd.to_datetime(data['Datetime']).dt.minute
+        data['Is_Market_Open'] = ((data['Hour'] >= 9) & (data['Hour'] < 16)).astype(int)
+        
+        # Fill NaN values
+        data = data.fillna(method='bfill').fillna(0)
+        
+        return data
+
+    def get_market_microstructure_features(self) -> Dict[str, float]:
+        """Get market microstructure features for short-term prediction accuracy"""
+        try:
+            features = {}
+            
+            # Get recent intraday data
+            intraday_data = self.get_intraday_data(interval="5m", days=1)
+            
+            if not intraday_data.empty and len(intraday_data) > 10:
+                # Bid-ask spread proxy (using high-low range)
+                recent_data = intraday_data.tail(10)
+                features['avg_spread_proxy'] = recent_data['High_Low_Range'].mean()
+                features['spread_volatility'] = recent_data['High_Low_Range'].std()
+                
+                # Order flow indicators
+                features['volume_trend'] = recent_data['Volume'].pct_change().mean()
+                features['volume_acceleration'] = recent_data['Volume'].pct_change().diff().mean()
+                
+                # Price impact (how much volume moves price)
+                price_changes = recent_data['Close'].pct_change().abs()
+                volume_changes = recent_data['Volume'].pct_change()
+                features['price_impact'] = (price_changes * volume_changes).mean()
+                
+                # Market efficiency ratio
+                features['market_efficiency'] = recent_data['Price_Change_1'].abs().mean()
+                
+                # Time-based features
+                current_hour = datetime.now().hour
+                features['is_market_open'] = 1 if 9 <= current_hour < 16 else 0
+                features['hours_until_close'] = max(0, 16 - current_hour)
+                features['hours_since_open'] = max(0, current_hour - 9)
+                
+                # Intraday momentum
+                features['intraday_momentum'] = recent_data['Price_Change_5'].mean()
+                features['momentum_acceleration'] = recent_data['Price_Change_5'].diff().mean()
+                
+                # Volatility clustering
+                features['volatility_clustering'] = recent_data['Volatility_Intraday'].autocorr()
+                
+                # Mean reversion indicator
+                features['mean_reversion'] = (recent_data['Close'].iloc[-1] - recent_data['MA_10'].iloc[-1]) / recent_data['MA_10'].iloc[-1]
+                
+            else:
+                # Fallback values if no intraday data
+                features = {
+                    'avg_spread_proxy': 0.01,
+                    'spread_volatility': 0.005,
+                    'volume_trend': 0.0,
+                    'volume_acceleration': 0.0,
+                    'price_impact': 0.0,
+                    'market_efficiency': 0.01,
+                    'is_market_open': 1 if 9 <= datetime.now().hour < 16 else 0,
+                    'hours_until_close': max(0, 16 - datetime.now().hour),
+                    'hours_since_open': max(0, datetime.now().hour - 9),
+                    'intraday_momentum': 0.0,
+                    'momentum_acceleration': 0.0,
+                    'volatility_clustering': 0.0,
+                    'mean_reversion': 0.0
+                }
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"Error getting market microstructure features: {str(e)}")
+            return {}
+
+    def get_real_time_sentiment(self) -> Dict[str, float]:
+        """Get real-time sentiment from multiple sources for 4-hour predictions"""
+        try:
+            sentiment_scores = {}
+            
+            # 1. Real-time news sentiment (last 4 hours)
+            try:
+                # Use Alpha Vantage News API or similar
+                news_sentiment = self.get_recent_news_sentiment(hours=4)
+                sentiment_scores['news_sentiment'] = news_sentiment
+            except Exception as e:
+                logger.warning(f"Failed to get real-time news: {str(e)}")
+                sentiment_scores['news_sentiment'] = 0.0
+            
+            # 2. Social media sentiment (Twitter/X, Reddit)
+            try:
+                social_sentiment = self.get_social_media_sentiment(hours=4)
+                sentiment_scores['social_sentiment'] = social_sentiment
+            except Exception as e:
+                logger.warning(f"Failed to get social media sentiment: {str(e)}")
+                sentiment_scores['social_sentiment'] = 0.0
+            
+            # 3. Earnings calendar impact
+            try:
+                earnings_impact = self.get_earnings_calendar_impact()
+                sentiment_scores['earnings_impact'] = earnings_impact
+            except Exception as e:
+                logger.warning(f"Failed to get earnings impact: {str(e)}")
+                sentiment_scores['earnings_impact'] = 0.0
+            
+            # 4. Analyst rating changes
+            try:
+                analyst_impact = self.get_analyst_rating_changes()
+                sentiment_scores['analyst_impact'] = analyst_impact
+            except Exception as e:
+                logger.warning(f"Failed to get analyst changes: {str(e)}")
+                sentiment_scores['analyst_impact'] = 0.0
+            
+            # 5. Options flow sentiment
+            try:
+                options_sentiment = self.get_options_flow_sentiment()
+                sentiment_scores['options_sentiment'] = options_sentiment
+            except Exception as e:
+                logger.warning(f"Failed to get options flow: {str(e)}")
+                sentiment_scores['options_sentiment'] = 0.0
+            
+            return sentiment_scores
+            
+        except Exception as e:
+            logger.error(f"Error getting real-time sentiment: {str(e)}")
+            return {}
+    
+    def get_recent_news_sentiment(self, hours: int = 4) -> float:
+        """Get sentiment from recent news articles"""
+        try:
+            # This would integrate with a real-time news API
+            # For now, we'll use Yahoo Finance news with time filtering
+            stock = yf.Ticker(self.ticker)
+            news = stock.news
+            
+            if not news:
+                return 0.0
+            
+            # Filter for recent news (last 4 hours)
+            cutoff_time = datetime.now() - timedelta(hours=hours)
+            recent_news = []
+            
+            for article in news:
+                try:
+                    pub_time = datetime.fromtimestamp(article.get('providerPublishTime', 0))
+                    if pub_time >= cutoff_time:
+                        recent_news.append(article)
+                except:
+                    continue
+            
+            if not recent_news:
+                return 0.0
+            
+            # Calculate weighted sentiment
+            total_sentiment = 0.0
+            total_weight = 0.0
+            
+            for article in recent_news:
+                title = article.get('title', '')
+                if title:
+                    sentiment = TextBlob(title).sentiment.polarity
+                    # Weight by relevance (could be enhanced with keyword matching)
+                    weight = 1.0
+                    total_sentiment += sentiment * weight
+                    total_weight += weight
+            
+            return total_sentiment / total_weight if total_weight > 0 else 0.0
+            
+        except Exception as e:
+            logger.error(f"Error getting recent news sentiment: {str(e)}")
+            return 0.0
+    
+    def get_social_media_sentiment(self, hours: int = 4) -> float:
+        """Get sentiment from social media platforms"""
+        try:
+            # Enhanced Reddit sentiment with time filtering
+            if self.reddit_client:
+                # Get recent posts from the last 4 hours
+                cutoff_time = datetime.now() - timedelta(hours=hours)
+                
+                # Search for recent posts mentioning the ticker
+                headers = self.reddit_client['headers']
+                subreddits = ['stocks', 'investing', 'wallstreetbets']
+                
+                recent_posts = []
+                for subreddit in subreddits:
+                    try:
+                        res = requests.get(f"https://oauth.reddit.com/r/{subreddit}/new", 
+                                         headers=headers, params={"limit": 100})
+                        
+                        if res.status_code == 200:
+                            posts = res.json()['data']['children']
+                            
+                            for post in posts:
+                                post_data = post['data']
+                                post_time = datetime.fromtimestamp(post_data['created_utc'])
+                                
+                                if post_time >= cutoff_time:
+                                    title = post_data.get('title', '').lower()
+                                    if self.ticker.lower() in title or f"${self.ticker.lower()}" in title:
+                                        sentiment = TextBlob(post_data['title']).sentiment.polarity
+                                        score = post_data.get('score', 0)
+                                        recent_posts.append({
+                                            'sentiment': sentiment,
+                                            'score': score,
+                                            'time': post_time
+                                        })
+                    except Exception as e:
+                        continue
+                
+                if recent_posts:
+                    # Weight by score and recency
+                    total_weighted_sentiment = 0.0
+                    total_weight = 0.0
+                    
+                    for post in recent_posts:
+                        # Weight by score and recency
+                        time_weight = 1.0 / (1.0 + (datetime.now() - post['time']).total_seconds() / 3600)
+                        score_weight = max(1, post['score'])
+                        weight = time_weight * score_weight
+                        
+                        total_weighted_sentiment += post['sentiment'] * weight
+                        total_weight += weight
+                    
+                    return total_weighted_sentiment / total_weight if total_weight > 0 else 0.0
+            
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"Error getting social media sentiment: {str(e)}")
+            return 0.0
+    
+    def get_earnings_calendar_impact(self) -> float:
+        """Get impact of upcoming earnings on sentiment"""
+        try:
+            # This would integrate with earnings calendar APIs
+            # For now, we'll use a simple heuristic based on time since last earnings
+            
+            stock = yf.Ticker(self.ticker)
+            info = stock.info
+            
+            # Get earnings dates if available
+            if 'earningsDates' in info and info['earningsDates']:
+                next_earnings = info['earningsDates'][0]
+                days_until_earnings = (next_earnings - datetime.now()).days
+                
+                # Impact increases as we get closer to earnings
+                if days_until_earnings <= 7:
+                    return 0.1  # Positive impact (earnings anticipation)
+                elif days_until_earnings <= 14:
+                    return 0.05
+                else:
+                    return 0.0
+            
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"Error getting earnings impact: {str(e)}")
+            return 0.0
+    
+    def get_analyst_rating_changes(self) -> float:
+        """Get impact of recent analyst rating changes"""
+        try:
+            # This would integrate with analyst rating APIs
+            # For now, return neutral impact
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"Error getting analyst changes: {str(e)}")
+            return 0.0
+    
+    def get_options_flow_sentiment(self) -> float:
+        """Get sentiment from options flow data"""
+        try:
+            # This would integrate with options flow APIs
+            # For now, return neutral impact
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"Error getting options flow: {str(e)}")
+            return 0.0
+
+    def predict_future_price_enhanced(self) -> float:
+        """Enhanced prediction using ensemble methods and intraday data"""
+        try:
+            logger.info(f"Running enhanced prediction for {self.ticker}...")
+            
+            # Get multiple data sources
+            daily_data = self.get_historical_data(days=self.config['lookback_days'])
+            intraday_data = self.get_intraday_data(interval="5m", days=5)
+            microstructure_features = self.get_market_microstructure_features()
+            real_time_sentiment = self.get_real_time_sentiment()
+            
+            if daily_data.empty:
+                raise ValueError(f"No daily data available for {self.ticker}")
+            
+            # Ensemble prediction using multiple models
+            predictions = []
+            weights = []
+            
+            # 1. Technical Analysis Model (40% weight)
+            try:
+                tech_prediction = self._technical_analysis_prediction(daily_data, intraday_data)
+                predictions.append(tech_prediction)
+                weights.append(0.4)
+                logger.info(f"Technical prediction: ${tech_prediction:.2f}")
+            except Exception as e:
+                logger.warning(f"Technical analysis failed: {str(e)}")
+            
+            # 2. Sentiment-Based Model (25% weight)
+            try:
+                sentiment_prediction = self._sentiment_based_prediction(daily_data, real_time_sentiment)
+                predictions.append(sentiment_prediction)
+                weights.append(0.25)
+                logger.info(f"Sentiment prediction: ${sentiment_prediction:.2f}")
+            except Exception as e:
+                logger.warning(f"Sentiment analysis failed: {str(e)}")
+            
+            # 3. Microstructure Model (20% weight)
+            try:
+                micro_prediction = self._microstructure_prediction(daily_data, microstructure_features)
+                predictions.append(micro_prediction)
+                weights.append(0.2)
+                logger.info(f"Microstructure prediction: ${micro_prediction:.2f}")
+            except Exception as e:
+                logger.warning(f"Microstructure analysis failed: {str(e)}")
+            
+            # 4. Mean Reversion Model (15% weight)
+            try:
+                reversion_prediction = self._mean_reversion_prediction(daily_data, intraday_data)
+                predictions.append(reversion_prediction)
+                weights.append(0.15)
+                logger.info(f"Mean reversion prediction: ${reversion_prediction:.2f}")
+            except Exception as e:
+                logger.warning(f"Mean reversion analysis failed: {str(e)}")
+            
+            # Calculate weighted ensemble prediction
+            if predictions and weights:
+                # Normalize weights
+                total_weight = sum(weights)
+                normalized_weights = [w / total_weight for w in weights]
+                
+                # Weighted average
+                ensemble_prediction = sum(p * w for p, w in zip(predictions, normalized_weights))
+                
+                # Apply confidence adjustment based on prediction consistency
+                prediction_std = np.std(predictions)
+                current_price = daily_data['Close'].iloc[-1]
+                price_std = current_price * 0.02  # 2% of current price
+                
+                # Reduce confidence if predictions are inconsistent
+                if prediction_std > price_std:
+                    confidence_factor = price_std / prediction_std
+                    ensemble_prediction = current_price + (ensemble_prediction - current_price) * confidence_factor
+                
+                logger.info(f"Ensemble prediction: ${ensemble_prediction:.2f}")
+                return ensemble_prediction
+            else:
+                # Fallback to original method
+                logger.warning("Ensemble prediction failed, using fallback method")
+                return self.predict_future_price()
+                
+        except Exception as e:
+            logger.error(f"Enhanced prediction failed: {str(e)}")
+            return self.predict_future_price()
+    
+    def _technical_analysis_prediction(self, daily_data: pd.DataFrame, intraday_data: pd.DataFrame) -> float:
+        """Technical analysis-based prediction"""
+        current_price = daily_data['Close'].iloc[-1]
+        
+        # Use recent intraday data if available
+        if not intraday_data.empty and len(intraday_data) > 20:
+            recent_intraday = intraday_data.tail(20)
+            
+            # Intraday momentum
+            intraday_momentum = recent_intraday['Price_Change_5'].mean()
+            
+            # Intraday RSI
+            current_rsi = recent_intraday['RSI_Intraday'].iloc[-1]
+            rsi_factor = (current_rsi - 50) / 50  # Normalize to [-1, 1]
+            
+            # Volume analysis
+            volume_trend = recent_intraday['Volume_Ratio_Intraday'].mean()
+            volume_factor = (volume_trend - 1) * 0.1  # Small volume impact
+            
+            # Volatility adjustment
+            volatility = recent_intraday['Volatility_Intraday'].mean()
+            volatility_factor = volatility * 0.05
+            
+            # Combine factors
+            prediction_change = (intraday_momentum * 0.4 + 
+                               rsi_factor * 0.3 + 
+                               volume_factor * 0.2 + 
+                               volatility_factor * 0.1)
+            
+        else:
+            # Fallback to daily data
+            recent_daily = daily_data.tail(20)
+            momentum = recent_daily['Price_Change'].mean()
+            prediction_change = momentum * 0.5
+        
+        # Apply conservative bounds
+        prediction_change = max(-0.02, min(0.02, prediction_change))
+        
+        return current_price * (1 + prediction_change)
+    
+    def _sentiment_based_prediction(self, daily_data: pd.DataFrame, sentiment_data: Dict[str, float]) -> float:
+        """Sentiment-based prediction"""
+        current_price = daily_data['Close'].iloc[-1]
+        
+        # Combine all sentiment sources
+        total_sentiment = 0.0
+        sentiment_weight = 0.0
+        
+        sentiment_weights = {
+            'news_sentiment': 0.3,
+            'social_sentiment': 0.25,
+            'earnings_impact': 0.2,
+            'analyst_impact': 0.15,
+            'options_sentiment': 0.1
+        }
+        
+        for sentiment_type, weight in sentiment_weights.items():
+            if sentiment_type in sentiment_data:
+                total_sentiment += sentiment_data[sentiment_type] * weight
+                sentiment_weight += weight
+        
+        if sentiment_weight > 0:
+            avg_sentiment = total_sentiment / sentiment_weight
+            # Convert sentiment to price impact (conservative)
+            sentiment_impact = avg_sentiment * 0.01  # 1% max impact
+            return current_price * (1 + sentiment_impact)
+        else:
+            return current_price
+    
+    def _microstructure_prediction(self, daily_data: pd.DataFrame, micro_features: Dict[str, float]) -> float:
+        """Market microstructure-based prediction"""
+        current_price = daily_data['Close'].iloc[-1]
+        
+        # Combine microstructure features
+        prediction_change = 0.0
+        
+        # Spread impact
+        if 'avg_spread_proxy' in micro_features:
+            spread_impact = micro_features['avg_spread_proxy'] * 0.1
+            prediction_change += spread_impact
+        
+        # Volume trend impact
+        if 'volume_trend' in micro_features:
+            volume_impact = micro_features['volume_trend'] * 0.05
+            prediction_change += volume_impact
+        
+        # Market efficiency impact
+        if 'market_efficiency' in micro_features:
+            efficiency_impact = micro_features['market_efficiency'] * 0.02
+            prediction_change += efficiency_impact
+        
+        # Time-based adjustments
+        if 'hours_until_close' in micro_features:
+            hours_left = micro_features['hours_until_close']
+            if hours_left <= 2:
+                # End-of-day effect
+                prediction_change *= 0.5  # Reduce prediction magnitude near close
+        
+        # Apply conservative bounds
+        prediction_change = max(-0.015, min(0.015, prediction_change))
+        
+        return current_price * (1 + prediction_change)
+    
+    def _mean_reversion_prediction(self, daily_data: pd.DataFrame, intraday_data: pd.DataFrame) -> float:
+        """Mean reversion-based prediction"""
+        current_price = daily_data['Close'].iloc[-1]
+        
+        # Calculate various moving averages
+        ma_5 = daily_data['Close'].rolling(5).mean().iloc[-1]
+        ma_10 = daily_data['Close'].rolling(10).mean().iloc[-1]
+        ma_20 = daily_data['Close'].rolling(20).mean().iloc[-1]
+        
+        # Mean reversion strength
+        reversion_to_ma5 = (ma_5 - current_price) / current_price
+        reversion_to_ma10 = (ma_10 - current_price) / current_price
+        reversion_to_ma20 = (ma_20 - current_price) / current_price
+        
+        # Weighted mean reversion
+        weighted_reversion = (reversion_to_ma5 * 0.5 + 
+                             reversion_to_ma10 * 0.3 + 
+                             reversion_to_ma20 * 0.2)
+        
+        # Apply mean reversion (conservative)
+        reversion_impact = weighted_reversion * 0.3  # 30% of the gap
+        
+        # Apply bounds
+        reversion_impact = max(-0.01, min(0.01, reversion_impact))
+        
+        return current_price * (1 + reversion_impact)
+
+    def build_ml_ensemble(self, X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, any]:
+        """Build machine learning ensemble for enhanced predictions"""
+        try:
+            from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+            from sklearn.linear_model import LinearRegression
+            from sklearn.svm import SVR
+            from sklearn.metrics import mean_squared_error, r2_score
+            import xgboost as xgb
+            
+            models = {}
+            predictions = {}
+            scores = {}
+            
+            # 1. Random Forest
+            try:
+                rf_model = RandomForestRegressor(
+                    n_estimators=100,
+                    max_depth=10,
+                    random_state=42,
+                    n_jobs=-1
+                )
+                rf_model.fit(X_train, y_train)
+                rf_pred = rf_model.predict(X_test)
+                rf_score = r2_score(y_test, rf_pred)
+                
+                models['random_forest'] = rf_model
+                predictions['random_forest'] = rf_pred
+                scores['random_forest'] = rf_score
+                logger.info(f"Random Forest R²: {rf_score:.4f}")
+            except Exception as e:
+                logger.warning(f"Random Forest failed: {str(e)}")
+            
+            # 2. XGBoost
+            try:
+                xgb_model = xgb.XGBRegressor(
+                    n_estimators=100,
+                    max_depth=6,
+                    learning_rate=0.1,
+                    random_state=42
+                )
+                xgb_model.fit(X_train, y_train)
+                xgb_pred = xgb_model.predict(X_test)
+                xgb_score = r2_score(y_test, xgb_pred)
+                
+                models['xgboost'] = xgb_model
+                predictions['xgboost'] = xgb_pred
+                scores['xgboost'] = xgb_score
+                logger.info(f"XGBoost R²: {xgb_score:.4f}")
+            except Exception as e:
+                logger.warning(f"XGBoost failed: {str(e)}")
+            
+            # 3. Gradient Boosting
+            try:
+                gb_model = GradientBoostingRegressor(
+                    n_estimators=100,
+                    max_depth=6,
+                    learning_rate=0.1,
+                    random_state=42
+                )
+                gb_model.fit(X_train, y_train)
+                gb_pred = gb_model.predict(X_test)
+                gb_score = r2_score(y_test, gb_pred)
+                
+                models['gradient_boosting'] = gb_model
+                predictions['gradient_boosting'] = gb_pred
+                scores['gradient_boosting'] = gb_score
+                logger.info(f"Gradient Boosting R²: {gb_score:.4f}")
+            except Exception as e:
+                logger.warning(f"Gradient Boosting failed: {str(e)}")
+            
+            # 4. Support Vector Regression
+            try:
+                svr_model = SVR(kernel='rbf', C=1.0, gamma='scale')
+                svr_model.fit(X_train, y_train)
+                svr_pred = svr_model.predict(X_test)
+                svr_score = r2_score(y_test, svr_pred)
+                
+                models['svr'] = svr_model
+                predictions['svr'] = svr_pred
+                scores['svr'] = svr_score
+                logger.info(f"SVR R²: {svr_score:.4f}")
+            except Exception as e:
+                logger.warning(f"SVR failed: {str(e)}")
+            
+            # 5. Linear Regression (baseline)
+            try:
+                lr_model = LinearRegression()
+                lr_model.fit(X_train, y_train)
+                lr_pred = lr_model.predict(X_test)
+                lr_score = r2_score(y_test, lr_pred)
+                
+                models['linear_regression'] = lr_model
+                predictions['linear_regression'] = lr_pred
+                scores['linear_regression'] = lr_score
+                logger.info(f"Linear Regression R²: {lr_score:.4f}")
+            except Exception as e:
+                logger.warning(f"Linear Regression failed: {str(e)}")
+            
+            # Calculate ensemble weights based on performance
+            if scores:
+                total_score = sum(scores.values())
+                ensemble_weights = {name: score / total_score for name, score in scores.items()}
+                
+                # Calculate ensemble prediction
+                ensemble_pred = np.zeros_like(y_test)
+                for name, pred in predictions.items():
+                    ensemble_pred += pred * ensemble_weights[name]
+                
+                ensemble_score = r2_score(y_test, ensemble_pred)
+                logger.info(f"Ensemble R²: {ensemble_score:.4f}")
+                
+                return {
+                    'models': models,
+                    'weights': ensemble_weights,
+                    'scores': scores,
+                    'ensemble_score': ensemble_score
+                }
+            else:
+                logger.error("No models successfully trained")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error building ML ensemble: {str(e)}")
+            return {}
+    
+    def predict_with_ml_ensemble(self, features: np.ndarray) -> float:
+        """Make prediction using trained ML ensemble"""
+        try:
+            if not hasattr(self, 'ml_ensemble') or not self.ml_ensemble:
+                logger.warning("ML ensemble not available, using fallback")
+                return 0.0
+            
+            ensemble_prediction = 0.0
+            total_weight = 0.0
+            
+            for model_name, model in self.ml_ensemble['models'].items():
+                if model_name in self.ml_ensemble['weights']:
+                    weight = self.ml_ensemble['weights'][model_name]
+                    prediction = model.predict(features.reshape(1, -1))[0]
+                    ensemble_prediction += prediction * weight
+                    total_weight += weight
+            
+            if total_weight > 0:
+                return ensemble_prediction / total_weight
+            else:
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"Error in ML ensemble prediction: {str(e)}")
+            return 0.0
 
 def main():
     """Main function to run the enhanced stock predictor"""
