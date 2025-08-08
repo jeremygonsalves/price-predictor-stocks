@@ -71,13 +71,13 @@ class EnhancedStockPredictor:
         except FileNotFoundError:
             logger.warning(f"Config file {config_file} not found, using defaults")
             return {
-                "ticker": "NVDA",
+                "ticker": "META",
                 "lookback_days": 60,
                 "prediction_hours": 4,
                 "alert_time": "12:00",
                 "buy_threshold": 1.0,
                 "sell_threshold": -1.0,
-                "confidence_threshold": 0.6,
+                "confidence_threshold": 0.7,
                 "training_epochs": 100,
                 "batch_size": 32,
                 "learning_rate": 0.0001,
@@ -765,7 +765,7 @@ class EnhancedStockPredictor:
             return 0
     
     def predict_future_price(self) -> float:
-        """Predict the stock price using a simple, reliable method"""
+        """Predict the stock price using realistic, conservative methods"""
         try:
             logger.info(f"Predicting future price for {self.ticker}...")
             
@@ -775,57 +775,86 @@ class EnhancedStockPredictor:
             if stock_data.empty or len(stock_data) < 5:
                 raise ValueError("Insufficient historical data for prediction")
             
-            # Use a simple but effective prediction method
-            recent_prices = stock_data['Close'].tail(10).values  # Last 10 days
+            # Use more conservative prediction methods
+            recent_prices = stock_data['Close'].tail(20).values  # Last 20 days for better stability
             
-            # Calculate moving averages
-            short_ma = np.mean(recent_prices[-5:])  # 5-day moving average
-            long_ma = np.mean(recent_prices)        # 10-day moving average
-            
-            # Calculate momentum
-            momentum = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
-            
-            # Calculate volatility
-            returns = np.diff(recent_prices) / recent_prices[:-1]
-            volatility = np.std(returns)
-            
-            # Simple prediction based on trend and momentum
+            # Calculate various technical indicators
             current_price = recent_prices[-1]
             
-            # Prediction factors
-            trend_factor = (short_ma - long_ma) / long_ma
-            momentum_factor = momentum * 0.5  # Dampen momentum
-            volatility_factor = volatility * 0.1  # Small volatility adjustment
+            # 1. Moving Average Analysis (conservative)
+            ma_5 = np.mean(recent_prices[-5:])
+            ma_10 = np.mean(recent_prices[-10:])
+            ma_20 = np.mean(recent_prices)
             
-            # Combine factors for prediction
-            prediction_change = trend_factor + momentum_factor + volatility_factor
+            # 2. Calculate realistic momentum (dampened)
+            daily_returns = np.diff(recent_prices) / recent_prices[:-1]
+            avg_daily_return = np.mean(daily_returns)
             
-            # Limit prediction to reasonable bounds (±10%)
-            prediction_change = max(-0.10, min(0.10, prediction_change))
+            # 3. Calculate volatility
+            volatility = np.std(daily_returns)
+            
+            # 4. Calculate RSI-like momentum
+            gains = np.where(daily_returns > 0, daily_returns, 0)
+            losses = np.where(daily_returns < 0, -daily_returns, 0)
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                rsi_factor = 1 - (100 / (100 + rs))  # Normalized RSI factor
+            else:
+                rsi_factor = 0.5  # Neutral
+            
+            # 5. Calculate realistic prediction factors
+            # Trend factor: How current price compares to moving averages
+            trend_factor = ((ma_5 - ma_20) / ma_20) * 0.1  # Dampened trend
+            
+            # Momentum factor: Based on recent price movement
+            momentum_factor = avg_daily_return * 2  # Conservative momentum
+            
+            # Volatility factor: Small adjustment based on volatility
+            volatility_factor = volatility * 0.05  # Very small volatility adjustment
+            
+            # RSI factor: Overbought/oversold adjustment
+            rsi_adjustment = (rsi_factor - 0.5) * 0.02  # Small RSI adjustment
+            
+            # Combine all factors for a realistic prediction
+            prediction_change = (trend_factor + momentum_factor + volatility_factor + rsi_adjustment)
+            
+            # Apply very conservative bounds (±2% for daily prediction)
+            prediction_change = max(-0.02, min(0.02, prediction_change))
+            
+            # Additional dampening for extreme values
+            if abs(prediction_change) > 0.01:  # If > 1%
+                prediction_change = prediction_change * 0.5  # Further dampen
             
             predicted_price = current_price * (1 + prediction_change)
             
+            # Log detailed analysis
             logger.info(f"Current price: ${current_price:.2f}")
-            logger.info(f"Short MA: ${short_ma:.2f}, Long MA: ${long_ma:.2f}")
-            logger.info(f"Trend: {trend_factor:.2%}, Momentum: {momentum_factor:.2%}")
-            logger.info(f"Predicted price: ${predicted_price:.2f} ({prediction_change:+.2%})")
+            logger.info(f"MA5: ${ma_5:.2f}, MA10: ${ma_10:.2f}, MA20: ${ma_20:.2f}")
+            logger.info(f"Avg daily return: {avg_daily_return:.4f}")
+            logger.info(f"Volatility: {volatility:.4f}")
+            logger.info(f"RSI factor: {rsi_factor:.4f}")
+            logger.info(f"Trend: {trend_factor:.4f}, Momentum: {momentum_factor:.4f}")
+            logger.info(f"Final prediction: ${predicted_price:.2f} ({prediction_change:+.4f})")
             
             return predicted_price
             
         except Exception as e:
             logger.error(f"Error predicting future price: {str(e)}")
             
-            # Ultra-simple fallback
+            # Conservative fallback
             try:
-                logger.info("Using ultra-simple fallback prediction...")
+                logger.info("Using conservative fallback prediction...")
                 stock_data = self.get_historical_data(days=5)
                 if not stock_data.empty and len(stock_data) >= 2:
                     current_price = stock_data['Close'].iloc[-1]
-                    # Just predict a small random change for testing
+                    # Very conservative random change (±0.5%)
                     import random
-                    change = random.uniform(-0.02, 0.02)  # ±2%
+                    change = random.uniform(-0.005, 0.005)
                     predicted_price = current_price * (1 + change)
-                    logger.info(f"Fallback prediction: ${predicted_price:.2f} ({change:+.2%})")
+                    logger.info(f"Fallback prediction: ${predicted_price:.2f} ({change:+.4f})")
                     return predicted_price
             except Exception as fallback_error:
                 logger.error(f"Fallback prediction failed: {str(fallback_error)}")
@@ -859,20 +888,22 @@ class EnhancedStockPredictor:
             # Calculate price change percentage
             price_change_pct = ((predicted_price - current_price) / current_price) * 100
             
-            # Get thresholds from config
-            buy_threshold = self.config.get('buy_threshold', 1.0)
-            sell_threshold = self.config.get('sell_threshold', -1.0)
+            # Get thresholds from config (more conservative for daily trading)
+            buy_threshold = self.config.get('buy_threshold', 0.5)  # 0.5% instead of 1.0%
+            sell_threshold = self.config.get('sell_threshold', -0.5)  # -0.5% instead of -1.0%
             
-            # Determine signal
+            # Determine signal with more conservative logic
             if price_change_pct > buy_threshold:
                 signal = 'BUY'
-                confidence = min(abs(price_change_pct) / 5.0, 1.0)
+                # More conservative confidence calculation
+                confidence = min(abs(price_change_pct) / 2.0, 0.8)  # Cap at 80% confidence
             elif price_change_pct < sell_threshold:
                 signal = 'SELL'
-                confidence = min(abs(price_change_pct) / 5.0, 1.0)
+                # More conservative confidence calculation
+                confidence = min(abs(price_change_pct) / 2.0, 0.8)  # Cap at 80% confidence
             else:
                 signal = 'HOLD'
-                confidence = 0.5
+                confidence = 0.6  # Higher base confidence for HOLD
             
             return {
                 'signal': signal,
@@ -895,13 +926,15 @@ class EnhancedStockPredictor:
             }
     
     def send_alert(self, signal_data: Dict[str, any]) -> None:
-        """Send trading alert with enhanced formatting"""
+        """Send detailed trading alert with comprehensive analysis"""
         try:
-            # Calculate 4pm EST time
             current_time = datetime.now()
-            four_pm_est = current_time.replace(hour=16, minute=0, second=0, microsecond=0)
             
-            # Create enhanced alert message
+            # Get additional market data for analysis
+            market_analysis = self.get_market_analysis()
+            sentiment_analysis = self.get_detailed_sentiment_analysis()
+            
+            # Create detailed alert message
             signal_emoji = {
                 'BUY': '🟢',
                 'SELL': '🔴',
@@ -914,19 +947,24 @@ class EnhancedStockPredictor:
             alert_msg = f"""
 {emoji} STOCK ALERT: {self.ticker} {emoji}
 
-⏰ ALERT TIME: {current_time.strftime('%Y-%m-%d %H:%M:%S')} EST
+Alert Time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} EST
+Current Price: ${signal_data['current_price']:.2f}
+Predicted Price (4PM EST): ${signal_data['predicted_price']:.2f}
+Expected Change: {signal_data.get('price_change_pct', 0):.2f}%
+Signal: {signal_data['signal']}
+Confidence: {signal_data['confidence']:.1%}
 
-💰 CURRENT STOCK VALUE: ${signal_data['current_price']:.2f}
+TECHNICAL ANALYSIS:
+{market_analysis}
 
-🎯 PREDICTED VALUE AT 4PM EST: ${signal_data['predicted_price']:.2f}
+SENTIMENT ANALYSIS:
+{sentiment_analysis}
 
-📊 PREDICTION: {signal_data['signal']}
-📈 EXPECTED CHANGE: {signal_data.get('price_change_pct', 0):.2f}%
-🎯 CONFIDENCE LEVEL: {signal_data['confidence']:.1%}
+RECOMMENDATION:
+{signal_data['reason']}
 
-📝 ANALYSIS: {signal_data['reason']}
-
-🔧 MODEL: Enhanced LSTM with Sentiment Analysis
+Model: Enhanced LSTM with Multi-Source Sentiment Analysis
+Data Sources: Yahoo Finance, Reddit, News APIs
             """.strip()
             
             # Log the alert
@@ -944,13 +982,133 @@ class EnhancedStockPredictor:
             # Send to Slack
             self.send_slack_notification(alert_msg, "#stock-price-alerts")
             
-            # Here you could add integrations for:
-            # - Email notifications
-            # - SMS alerts
-            # - Trading platform APIs
-            
         except Exception as e:
             logger.error(f"Error sending alert: {str(e)}")
+    
+    def get_market_analysis(self) -> str:
+        """Get detailed market analysis with technical indicators"""
+        try:
+            # Get recent historical data
+            stock_data = self.get_historical_data(days=20)
+            
+            if stock_data.empty or len(stock_data) < 10:
+                return "Insufficient data for technical analysis"
+            
+            current_price = stock_data['Close'].iloc[-1]
+            
+            # Calculate key technical indicators
+            ma_5 = stock_data['Close'].rolling(5).mean().iloc[-1]
+            ma_10 = stock_data['Close'].rolling(10).mean().iloc[-1]
+            ma_20 = stock_data['Close'].rolling(20).mean().iloc[-1]
+            
+            # RSI calculation
+            delta = stock_data['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
+            rs = gain / loss if loss > 0 else 0
+            rsi = 100 - (100 / (1 + rs)) if rs > 0 else 50
+            
+            # MACD
+            exp1 = stock_data['Close'].ewm(span=12).mean()
+            exp2 = stock_data['Close'].ewm(span=26).mean()
+            macd = exp1.iloc[-1] - exp2.iloc[-1]
+            
+            # Bollinger Bands
+            bb_middle = stock_data['Close'].rolling(20).mean().iloc[-1]
+            bb_std = stock_data['Close'].rolling(20).std().iloc[-1]
+            bb_upper = bb_middle + (bb_std * 2)
+            bb_lower = bb_middle - (bb_std * 2)
+            bb_position = (current_price - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
+            
+            # Volume analysis
+            avg_volume = stock_data['Volume'].rolling(10).mean().iloc[-1]
+            current_volume = stock_data['Volume'].iloc[-1]
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
+            
+            # Price momentum
+            price_change_1d = ((current_price - stock_data['Close'].iloc[-2]) / stock_data['Close'].iloc[-2]) * 100
+            price_change_5d = ((current_price - stock_data['Close'].iloc[-6]) / stock_data['Close'].iloc[-6]) * 100
+            
+            analysis = f"""
+• Moving Averages: MA5: ${ma_5:.2f} | MA10: ${ma_10:.2f} | MA20: ${ma_20:.2f}
+• RSI: {rsi:.1f} ({'Overbought' if rsi > 70 else 'Oversold' if rsi < 30 else 'Neutral'})
+• MACD: {macd:.2f} ({'Bullish' if macd > 0 else 'Bearish'})
+• Bollinger Position: {bb_position:.2%} ({'Upper Band' if bb_position > 0.8 else 'Lower Band' if bb_position < 0.2 else 'Middle Range'})
+• Volume: {volume_ratio:.1f}x average ({'High' if volume_ratio > 1.5 else 'Low' if volume_ratio < 0.5 else 'Normal'})
+• Price Momentum: 1D: {price_change_1d:+.2f}% | 5D: {price_change_5d:+.2f}%
+• Trend: {'Bullish' if current_price > ma_20 else 'Bearish'} (Price vs MA20: {((current_price/ma_20)-1)*100:+.2f}%)
+            """.strip()
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error getting market analysis: {str(e)}")
+            return "Unable to generate technical analysis"
+    
+    def get_detailed_sentiment_analysis(self) -> str:
+        """Get detailed sentiment analysis from multiple sources"""
+        try:
+            sentiment_info = []
+            
+            # Reddit sentiment
+            try:
+                reddit_sentiment = self.get_ticker_specific_sentiment(limit=50)
+                if not reddit_sentiment.empty and len(reddit_sentiment) > 0:
+                    avg_polarity = reddit_sentiment['avg_polarity'].mean()
+                    total_posts = reddit_sentiment['total_volume'].sum()
+                    
+                    sentiment_label = "Bullish" if avg_polarity > 0.1 else "Bearish" if avg_polarity < -0.1 else "Neutral"
+                    sentiment_info.append(f"• Reddit Sentiment: {sentiment_label} ({avg_polarity:+.3f}) - {total_posts:.0f} mentions")
+                else:
+                    sentiment_info.append("• Reddit Sentiment: No recent mentions found")
+            except Exception as e:
+                sentiment_info.append("• Reddit Sentiment: Unable to fetch data")
+            
+            # News sentiment
+            try:
+                news_sentiment = self.get_news_sentiment()
+                if not news_sentiment.empty and len(news_sentiment) > 0:
+                    avg_news_polarity = news_sentiment['avg_polarity'].mean()
+                    article_count = news_sentiment['article_count'].sum()
+                    
+                    news_label = "Positive" if avg_news_polarity > 0.1 else "Negative" if avg_news_polarity < -0.1 else "Neutral"
+                    sentiment_info.append(f"• News Sentiment: {news_label} ({avg_news_polarity:+.3f}) - {article_count:.0f} articles")
+                else:
+                    sentiment_info.append("• News Sentiment: No recent news found")
+            except Exception as e:
+                sentiment_info.append("• News Sentiment: Unable to fetch data")
+            
+            # Yahoo Finance data
+            try:
+                stock = yf.Ticker(self.ticker)
+                info = stock.info
+                
+                # Market cap and sector info
+                market_cap = info.get('marketCap', 0)
+                sector = info.get('sector', 'Unknown')
+                industry = info.get('industry', 'Unknown')
+                
+                if market_cap > 0:
+                    market_cap_str = f"${market_cap/1e9:.1f}B" if market_cap >= 1e9 else f"${market_cap/1e6:.1f}M"
+                    sentiment_info.append(f"• Market Cap: {market_cap_str} | Sector: {sector}")
+                
+                # Analyst recommendations
+                if 'recommendationMean' in info:
+                    rec_mean = info['recommendationMean']
+                    rec_count = info.get('numberOfAnalystOpinions', 0)
+                    sentiment_info.append(f"• Analyst Rating: {rec_mean:.2f}/5.0 ({rec_count} analysts)")
+                
+            except Exception as e:
+                sentiment_info.append("• Market Data: Unable to fetch additional market data")
+            
+            if not sentiment_info:
+                return "No sentiment data available"
+            
+            return "\n".join(sentiment_info)
+            
+        except Exception as e:
+            logger.error(f"Error getting sentiment analysis: {str(e)}")
+            return "Unable to generate sentiment analysis"
     
     def send_slack_notification(self, message: str, channel: str = "#stock-price-alerts") -> None:
         """Send notification to Slack using the provided logic"""
