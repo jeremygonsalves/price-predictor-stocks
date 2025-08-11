@@ -138,12 +138,12 @@ flowchart TD
     O8 --> O11[Print to Console]
     
     %% Styling
-    classDef startEnd fill:#e1f5fe
-    classDef dataCollection fill:#f3e5f5
-    classDef calculation fill:#e8f5e8
-    classDef decision fill:#fff3e0
-    classDef output fill:#fce4ec
-    classDef ensemble fill:#fff8e1
+    classDef startEnd fill:#000,stroke:#4FC3F7,color:#fff,stroke-width:2px
+    classDef dataCollection fill:#000,stroke:#AB47BC,color:#fff,stroke-width:2px
+    classDef calculation fill:#000,stroke:#66BB6A,color:#fff,stroke-width:2px
+    classDef decision fill:#000,stroke:#FFB74D,color:#fff,stroke-width:2px
+    classDef output fill:#000,stroke:#F06292,color:#fff,stroke-width:2px
+    classDef ensemble fill:#000,stroke:#FFD54F,color:#fff,stroke-width:2px
     
     class A startEnd
     class B,C,D,E dataCollection
@@ -181,10 +181,10 @@ flowchart LR
     D --> D4["Volume-Price Impact"]
     D --> D5["Time-based Adjustments"]
     
-    classDef indicator fill:#e3f2fd
-    classDef calculation fill:#f1f8e9
-    classDef result fill:#fff8e1
-    classDef microstructure fill:#fce4ec
+    classDef indicator fill:#000,stroke:#64B5F6,color:#fff,stroke-width:2px
+    classDef calculation fill:#000,stroke:#AED581,color:#fff,stroke-width:2px
+    classDef result fill:#000,stroke:#FFD54F,color:#fff,stroke-width:2px
+    classDef microstructure fill:#000,stroke:#F48FB1,color:#fff,stroke-width:2px
     
     class A indicator
     class B,C calculation
@@ -231,14 +231,14 @@ flowchart TD
     F3 --> G
     G --> H[Final Sentiment Score]
     
-    classDef source fill:#fce4ec
-    classDef process fill:#e8f5e8
-    classDef result fill:#fff3e0
+    classDef source fill:#000,stroke:#F48FB1,color:#fff,stroke-width:2px
+    classDef process fill:#000,stroke:#81C784,color:#fff,stroke-width:2px
+    classDef result fill:#000,stroke:#FFCC80,color:#fff,stroke-width:2px
     
     class A,B,C,D,E,F source
     class B1,B2,B3,B4,C1,C2,C3,C4,D1,D2,D3,E1,E2,E3,F1,F2,F3 process
     class G,H result
-```
+```}  الأخير
 
 ## Ensemble Prediction Algorithm Breakdown
 
@@ -292,11 +292,11 @@ flowchart TD
     H --> I[Prediction Consistency Check]
     I --> J[Final Ensemble Prediction]
     
-    classDef input fill:#e1f5fe
-    classDef model fill:#f3e5f5
-    classDef calculation fill:#e8f5e8
-    classDef ensemble fill:#fff8e1
-    classDef result fill:#fce4ec
+    classDef input fill:#000,stroke:#4FC3F7,color:#fff,stroke-width:2px
+    classDef model fill:#000,stroke:#AB47BC,color:#fff,stroke-width:2px
+    classDef calculation fill:#000,stroke:#66BB6A,color:#fff,stroke-width:2px
+    classDef ensemble fill:#000,stroke:#FFD54F,color:#fff,stroke-width:2px
+    classDef result fill:#000,stroke:#F06292,color:#fff,stroke-width:2px
     
     class A input
     class B,C,D,E model
@@ -334,10 +334,10 @@ flowchart TD
     O --> P[Weight by Performance]
     P --> Q[Ensemble Prediction]
     
-    classDef data fill:#e1f5fe
-    classDef model fill:#f3e5f5
-    classDef prediction fill:#e8f5e8
-    classDef ensemble fill:#fff8e1
+    classDef data fill:#000,stroke:#64B5F6,color:#fff,stroke-width:2px
+    classDef model fill:#000,stroke:#AB47BC,color:#fff,stroke-width:2px
+    classDef prediction fill:#000,stroke:#66BB6A,color:#fff,stroke-width:2px
+    classDef ensemble fill:#000,stroke:#FFD54F,color:#fff,stroke-width:2px
     
     class A,B data
     class C,D,E,F,G,H model
