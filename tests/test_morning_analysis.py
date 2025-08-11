@@ -6,10 +6,11 @@ Test script for Morning Stock Analysis
 import sys
 import os
 
-# Add src directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Ensure project root is in path and use package import
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, 'src'))
 
-from morning_stock_analysis import MorningStockAnalyzer
+from price_predictor.analysis.morning_stock_analysis import MorningStockAnalyzer
 
 def test_morning_analysis():
     """Test the morning stock analysis functionality"""
@@ -31,8 +32,9 @@ def test_morning_analysis():
         print(report)
         
         # Save results
-        analyzer.save_analysis_to_file(analysis_result, "test_morning_analysis.txt")
-        print("\nTest completed successfully! Results saved to test_morning_analysis.txt")
+        output_path = os.path.join(PROJECT_ROOT, "reports", "test_morning_analysis.txt")
+        analyzer.save_analysis_to_file(analysis_result, output_path)
+        print(f"\nTest completed successfully! Results saved to {output_path}")
         
     except Exception as e:
         print(f"Test failed with error: {str(e)}")

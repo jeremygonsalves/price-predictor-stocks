@@ -25,7 +25,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class MorningStockAnalyzer:
-    def __init__(self, config_file: str = "config.json"):
+    def __init__(self, config_file: str = "configs/config.json"):
         """
         Initialize the morning stock analyzer
         
@@ -101,11 +101,11 @@ class MorningStockAnalyzer:
     def load_alpha_vantage_key(self) -> Optional[str]:
         """Load Alpha Vantage API key using the same logic as enhanced_stock_alert.py"""
         try:
-            # Check for Alpha Vantage key in separate file (like in the enhanced script)
-            if os.path.exists('src/alphavantage.txt'):
-                with open('src/alphavantage.txt', 'r') as f:
+            # Check for Alpha Vantage key in new secrets directory
+            if os.path.exists('secrets/alphavantage.txt'):
+                with open('secrets/alphavantage.txt', 'r') as f:
                     api_key = f.read().strip()
-                logger.info("Alpha Vantage API key loaded from file")
+                logger.info("Alpha Vantage API key loaded from secrets/alphavantage.txt")
                 return api_key
             else:
                 # Fallback to environment variable
@@ -123,18 +123,18 @@ class MorningStockAnalyzer:
     def init_reddit_client(self) -> Optional[dict]:
         """Initialize Reddit client using the logic from the enhanced_stock_alert.py"""
         try:
-            # Check for Reddit credentials in separate files (like in the enhanced script)
-            if (os.path.exists('src/pw.txt') and 
-                os.path.exists('src/client_id.txt') and 
-                os.path.exists('src/client_secret.txt')):
+            # Check for Reddit credentials in new secrets directory
+            if (os.path.exists('secrets/pw.txt') and 
+                os.path.exists('secrets/client_id.txt') and 
+                os.path.exists('secrets/client_secret.txt')):
                 
-                with open('src/pw.txt', 'r') as f:
+                with open('secrets/pw.txt', 'r') as f:
                     pw = f.read().strip()
                 
-                with open('src/client_id.txt', 'r') as f:
+                with open('secrets/client_id.txt', 'r') as f:
                     client_id = f.read().strip()
                 
-                with open('src/client_secret.txt', 'r') as f:
+                with open('secrets/client_secret.txt', 'r') as f:
                     client_secret = f.read().strip()
                 
                 # Use the same authentication logic as the enhanced script
@@ -153,7 +153,7 @@ class MorningStockAnalyzer:
                     token = res.json()['access_token']
                     headers = {**headers, **{'Authorization': f"bearer {token}"}}
                     
-                    logger.info("Reddit API client initialized successfully using enhanced script logic")
+                    logger.info("Reddit API client initialized successfully using secrets credentials")
                     return {
                         'headers': headers,
                         'token': token,
@@ -163,7 +163,7 @@ class MorningStockAnalyzer:
                     logger.warning(f"Failed to get Reddit token: {res.status_code}")
                     return None
             else:
-                logger.info("Reddit credential files not found, sentiment analysis will use dummy data")
+                logger.info("Reddit credential files not found in secrets/, sentiment analysis will use dummy data")
                 return None
         except Exception as e:
             logger.warning(f"Failed to initialize Reddit client: {str(e)}")
@@ -693,10 +693,13 @@ class MorningStockAnalyzer:
         except Exception as e:
             logger.error(f"Error sending Slack notification: {str(e)}")
     
-    def save_analysis_to_file(self, analysis_result: Dict, filename: str = "morning_stock_analysis.txt") -> None:
-        """Save analysis results to a file"""
+    def save_analysis_to_file(self, analysis_result: Dict, filename: str = "reports/morning_stock_analysis.txt") -> None:
+        """Save analysis results to a file (defaulting to reports/)"""
         try:
             report = self.format_analysis_report(analysis_result)
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
             
             with open(filename, 'w') as f:
                 f.write(report)
@@ -752,7 +755,7 @@ def main():
     parser = argparse.ArgumentParser(description="Morning Stock Analysis Tool")
     parser.add_argument("--run-once", action="store_true", help="Run analysis once and exit")
     parser.add_argument("--schedule", action="store_true", help="Schedule daily analysis at 8:30 AM")
-    parser.add_argument("--config", default="config.json", help="Path to config file")
+    parser.add_argument("--config", default="configs/config.json", help="Path to config file")
     
     args = parser.parse_args()
     

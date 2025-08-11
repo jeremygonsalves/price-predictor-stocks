@@ -9,7 +9,9 @@ import json
 from datetime import datetime
 
 # Add src directory to path
-sys.path.append('src')
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
+
 
 def test_imports():
     """Test if all required modules can be imported"""
@@ -71,7 +73,7 @@ def test_config():
     print("\nTesting configuration...")
     
     try:
-        with open('config.json', 'r') as f:
+        with open(os.path.join(PROJECT_ROOT, 'configs', 'config.json'), 'r') as f:
             config = json.load(f)
         
         required_keys = ['ticker', 'lookback_days', 'prediction_hours', 'alert_time']
@@ -89,10 +91,10 @@ def test_config():
         return True
         
     except FileNotFoundError:
-        print("❌ config.json not found")
+        print("❌ configs/config.json not found")
         return False
     except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON in config.json: {e}")
+        print(f"❌ Invalid JSON in configs/config.json: {e}")
         return False
 
 def test_stock_data():
@@ -104,7 +106,7 @@ def test_stock_data():
         from datetime import datetime, timedelta
         
         # Load config
-        with open('config.json', 'r') as f:
+        with open(os.path.join(PROJECT_ROOT, 'configs', 'config.json'), 'r') as f:
             config = json.load(f)
         
         ticker = config['ticker']
@@ -139,7 +141,7 @@ def test_predictor_class():
     print("\nTesting predictor class...")
     
     try:
-        from enhanced_stock_alert import EnhancedStockPredictor
+        from price_predictor.alerts.enhanced_stock_alert import EnhancedStockPredictor
         
         # Initialize predictor
         predictor = EnhancedStockPredictor()
@@ -237,14 +239,14 @@ def main():
     if passed == total:
         print("🎉 All tests passed! The system is ready to use.")
         print("\nNext steps:")
-        print("1. Run: python src/enhanced_stock_alert.py")
+        print("1. Run: python src/price_predictor/alerts/enhanced_stock_alert.py")
         print("2. The system will start and run analysis at 12pm daily")
     else:
         print("⚠️  Some tests failed. Please check the errors above.")
         print("\nTroubleshooting:")
         print("1. Run: python setup.py")
         print("2. Check your internet connection")
-        print("3. Verify the stock ticker in config.json")
+        print("3. Verify the stock ticker in configs/config.json")
 
 if __name__ == "__main__":
     main() 

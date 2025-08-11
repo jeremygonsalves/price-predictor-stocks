@@ -25,7 +25,7 @@ import re
 from dotenv import load_dotenv
 
 class EnhancedStockPredictor:
-    def __init__(self, config_file: str = "config.json"):
+    def __init__(self, config_file: str = "configs/config.json"):
         """
         Initialize the enhanced stock predictor with configuration
         
@@ -72,8 +72,8 @@ class EnhancedStockPredictor:
             logger.info(f"Configuration loaded from {config_file}")
             return config
         except FileNotFoundError:
-            logger.error(f"Config file {config_file} not found. Please ensure the config.json file exists in the project root.")
-            raise FileNotFoundError(f"Config file {config_file} not found. Please create a config.json file with the required settings.")
+            logger.error(f"Config file {config_file} not found. Please ensure the configs/config.json file exists in the project root.")
+            raise FileNotFoundError(f"Config file {config_file} not found. Please create configs/config.json with the required settings.")
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in config file {config_file}: {str(e)}")
             raise ValueError(f"Invalid JSON format in config file: {str(e)}")
@@ -124,18 +124,18 @@ class EnhancedStockPredictor:
     def init_reddit_client(self) -> Optional[dict]:
         """Initialize Reddit client using the logic from the notebook"""
         try:
-            # Check for Reddit credentials in separate files (like in the notebook)
-            if (os.path.exists('pw.txt') and 
-                os.path.exists('client_id.txt') and 
-                os.path.exists('client_secret.txt')):
+            # Check for Reddit credentials in new secrets directory
+            if (os.path.exists('secrets/pw.txt') and 
+                os.path.exists('secrets/client_id.txt') and 
+                os.path.exists('secrets/client_secret.txt')):
                 
-                with open('pw.txt', 'r') as f:
+                with open('secrets/pw.txt', 'r') as f:
                     pw = f.read().strip()
                 
-                with open('client_id.txt', 'r') as f:
+                with open('secrets/client_id.txt', 'r') as f:
                     client_id = f.read().strip()
                 
-                with open('client_secret.txt', 'r') as f:
+                with open('secrets/client_secret.txt', 'r') as f:
                     client_secret = f.read().strip()
                 
                 # Use the same authentication logic as the notebook
@@ -154,7 +154,7 @@ class EnhancedStockPredictor:
                     token = res.json()['access_token']
                     headers = {**headers, **{'Authorization': f"bearer {token}"}}
                     
-                    logger.info("Reddit API client initialized successfully using notebook logic")
+                    logger.info("Reddit API client initialized successfully using secrets credentials")
                     return {
                         'headers': headers,
                         'token': token,
@@ -164,7 +164,7 @@ class EnhancedStockPredictor:
                     logger.warning(f"Failed to get Reddit token: {res.status_code}")
                     return None
             else:
-                logger.info("Reddit credential files not found, sentiment analysis will use dummy data")
+                logger.info("Reddit credential files not found in secrets/, sentiment analysis will use dummy data")
                 return None
         except Exception as e:
             logger.warning(f"Failed to initialize Reddit client: {str(e)}")
