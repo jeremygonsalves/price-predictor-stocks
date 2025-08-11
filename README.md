@@ -28,26 +28,74 @@ python setup.py
 
 ### 2. Configuration
 
-Edit `config.json` to customize your settings:
+Edit `config.json` to customize your settings (core settings):
 
 ```json
 {
-    "ticker": "NVDA",
-    "lookback_days": 60,
-    "prediction_hours": 4,
-    "alert_time": "12:00",
-    "buy_threshold": 1.0,
-    "sell_threshold": -1.0,
-    "confidence_threshold": 0.5,
-    "training_epochs": 100,
-    "batch_size": 32,
-    "learning_rate": 0.001,
-    "enable_sentiment_analysis": true,
-    "enable_technical_indicators": true,
-    "log_level": "INFO",
-    "save_alerts_to_file": true,
-    "alert_file": "trading_alerts.txt",
-    "log_file": "stock_alerts.log"
+  "ticker": "MSFT",
+  "lookback_days": 10,
+  "prediction_hours": 4,
+  "alert_time": "12:00",
+  "buy_threshold": 0.5,
+  "sell_threshold": -0.5,
+  "confidence_threshold": 0.7,
+  "training_epochs": 100,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "enable_sentiment_analysis": true,
+  "enable_technical_indicators": true,
+  "log_level": "INFO",
+  "save_alerts_to_file": true,
+  "alert_file": "trading_alerts.txt",
+  "log_file": "stock_alerts.log"
+}
+```
+
+Advanced settings (optional):
+
+```json
+{
+  "min_required_days": 20,
+  "min_training_samples": 30,
+  "min_prediction_days": 5,
+  "min_fallback_days": 2,
+  "min_analysis_days": 10,
+  "extra_days_for_safety": 20,
+  "fallback_period": "1y",
+  "current_price_days": 5,
+  "date_range_days": 7,
+  "recent_days_for_prediction": 15,
+  "fallback_days": 5,
+  "sentiment_analysis_limit": 50,
+  "news_article_limit": 50,
+  "use_enhanced_prediction": true,
+  "intraday_interval": "5m",
+  "intraday_days": 5,
+  "ensemble_weights": {
+    "technical_analysis": 0.4,
+    "sentiment_based": 0.25,
+    "microstructure": 0.2,
+    "mean_reversion": 0.15
+  },
+  "real_time_sentiment": {
+    "enable_news_sentiment": true,
+    "enable_social_sentiment": true,
+    "enable_earnings_impact": true,
+    "enable_analyst_impact": true,
+    "enable_options_flow": true,
+    "sentiment_hours": 4
+  },
+  "microstructure_features": {
+    "enable_spread_analysis": true,
+    "enable_volume_analysis": true,
+    "enable_market_efficiency": true,
+    "enable_time_based_adjustments": true
+  },
+  "prediction_bounds": {
+    "max_daily_change": 0.02,
+    "max_intraday_change": 0.015,
+    "confidence_dampening": 0.5
+  }
 }
 ```
 
@@ -129,6 +177,28 @@ python src/real_time_stock_alert.py
 - `enable_technical_indicators`: Enable/disable technical indicators
 - `save_alerts_to_file`: Save alerts to file
 
+### Data and Training Thresholds
+- `min_required_days`, `min_training_samples`, `min_prediction_days`, `min_fallback_days`, `min_analysis_days`
+- `extra_days_for_safety`, `fallback_period`, `fallback_days`
+
+### Price Fetch and Windowing
+- `current_price_days`, `date_range_days`, `recent_days_for_prediction`
+
+### Intraday Settings
+- `intraday_interval` (e.g., "5m"), `intraday_days`
+
+### Ensemble Weights
+- `ensemble_weights.technical_analysis`, `sentiment_based`, `microstructure`, `mean_reversion`
+
+### Real-Time Sentiment Toggles
+- `real_time_sentiment.enable_news_sentiment`, `enable_social_sentiment`, `enable_earnings_impact`, `enable_analyst_impact`, `enable_options_flow`, `sentiment_hours`
+
+### Microstructure Features Toggles
+- `microstructure_features.enable_spread_analysis`, `enable_volume_analysis`, `enable_market_efficiency`, `enable_time_based_adjustments`
+
+### Prediction Bounds
+- `prediction_bounds.max_daily_change`, `max_intraday_change`, `confidence_dampening`
+
 ## Technical Indicators Used
 
 - **Moving Averages**: 5, 10, 20, 50, 200-day
@@ -197,15 +267,15 @@ The system now includes a comprehensive morning stock analysis feature that runs
 # Run morning analysis once
 python src/morning_stock_analysis.py --run-once
 
-# Schedule daily analysis at 8:30 AM
-python src/morning_stock_analysis.py --schedule
+# Schedule daily analysis at 8:30 AM (runner-based cron)
+/Users/jeremygonsalves/python_runner.sh morning_analysis schedule
 
-# Using the python runner script
+# Using the python runner script (one-off)
 ./python_runner.sh morning_analysis
 
 # Add to crontab manually (8:30 AM weekdays)
 # crontab -e
-# Add: 30 8 * * 1-5 /Users/jeremygonsalves/python_runner.sh morning_analysis >> /Users/jeremygonsalves/morning_analysis.log 2>&1
+# Add: 30 8 * * 1-5 /Users/jeremygonsalves/python_runner.sh morning_analysis >> /Users/jeremygonsalves/logs/morning_analysis.log 2>&1
 ```
 
 ### Sample Output
