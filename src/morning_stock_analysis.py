@@ -564,26 +564,28 @@ class MorningStockAnalyzer:
         }
     
     def format_analysis_report(self, analysis_result: Dict) -> str:
-        """Format the analysis results into a readable report"""
+        """Format the analysis results into a readable report with outlook and summary"""
         report = []
-        report.append("🚀 **MORNING STOCK ANALYSIS REPORT** 🚀")
-        report.append(f"📅 Analysis Date: {analysis_result['analysis_time'].strftime('%Y-%m-%d %H:%M')}")
-        report.append(f"⏰ Time Range: {analysis_result['time_range']['start'].strftime('%m/%d %H:%M')} - {analysis_result['time_range']['end'].strftime('%m/%d %H:%M')}")
-        report.append(f"📊 Stocks Analyzed: {analysis_result['total_stocks_analyzed']}")
-        report.append(f"📈 Stocks with Sufficient News: {analysis_result['stocks_with_sufficient_news']}")
+        # Header (simplified, fewer emojis)
+        report.append("**Morning Stock Analysis Report**")
+        report.append(f"Analysis Date: {analysis_result['analysis_time'].strftime('%Y-%m-%d %H:%M')}")
+        report.append(f"Time Range: {analysis_result['time_range']['start'].strftime('%m/%d %H:%M')} - {analysis_result['time_range']['end'].strftime('%m/%d %H:%M')}")
+        report.append(f"Stocks Analyzed: {analysis_result['total_stocks_analyzed']}")
+        report.append(f"Stocks with Sufficient News: {analysis_result['stocks_with_sufficient_news']}")
         report.append("")
         
         if not analysis_result['top_stocks']:
-            report.append("❌ No stocks met the minimum criteria for today's watchlist.")
+            report.append("No stocks met the minimum criteria for today's watchlist.")
             return "\n".join(report)
         
-        report.append("🔥 **TOP STOCKS TO WATCH TODAY** 🔥")
+        report.append("**Top stocks to watch today**")
         report.append("")
         
         for i, (ticker, data) in enumerate(analysis_result['top_stocks'], 1):
             score = data['score']
             price_data = data['price_data']
             score_details = data['score_details']
+            news_items = data['news_data']
             
             report.append(f"**{i}. {ticker}** (Score: {score:.2f})")
             
@@ -591,19 +593,49 @@ class MorningStockAnalyzer:
                 current_price = price_data['current_price']
                 price_change = price_data['price_change']
                 price_change_pct = price_data['price_change_pct']
-                
                 price_emoji = "📈" if price_change >= 0 else "📉"
                 report.append(f"   💰 Price: ${current_price:.2f} ({price_emoji} {price_change_pct:+.2f}%)")
-                
                 if price_data.get('sector'):
                     report.append(f"   🏢 Sector: {price_data['sector']}")
             
+            # Core metrics
             report.append(f"   📰 News Count: {data['total_news']}")
-            report.append(f"   😊 Sentiment: {score_details['avg_sentiment']:.2f}")
+            report.append(f"   Sentiment: {score_details['avg_sentiment']:+.2f}")
             report.append(f"   💡 Reason: {score_details['reason']}")
             
-            # Add top news headlines
-            top_news = sorted(data['news_data'], key=lambda x: x.get('score', 0), reverse=True)[:3]
+            # Expected move and concise summary driven by sentiment and momentum
+            avg_sentiment = score_details.get('avg_sentiment', 0.0)
+            total_news = data.get('total_news', 0)
+            price_change_pct = price_data.get('price_change_pct', 0.0) if price_data else 0.0
+            
+            if avg_sentiment >= 0.10 or price_change_pct >= 1.0:
+                outlook_label = "Likely Rise"
+            elif avg_sentiment <= -0.10 or price_change_pct <= -1.0:
+                outlook_label = "Likely Fall"
+            else:
+                outlook_label = "Neutral / Range-bound"
+            
+            # Source breadth
+            distinct_sources = len({item.get('source', 'unknown') for item in news_items})
+            source_text = "multi-source coverage" if distinct_sources >= 2 else "limited coverage"
+            
+            # Momentum descriptor
+            if price_change_pct >= 0.5:
+                momentum_text = "upward momentum"
+            elif price_change_pct <= -0.5:
+                momentum_text = "downward momentum"
+            else:
+                momentum_text = "flat momentum"
+            
+            report.append(
+                f"   Outlook: {outlook_label} — sentiment {avg_sentiment:+.2f}; news {total_news}; momentum {price_change_pct:+.1f}%"
+            )
+            report.append(
+                f"   Summary: {('Positive' if avg_sentiment > 0.05 else 'Negative' if avg_sentiment < -0.05 else 'Mixed')} sentiment with {source_text} and {momentum_text}."
+            )
+            
+            # Top news headlines
+            top_news = sorted(news_items, key=lambda x: x.get('score', 0), reverse=True)[:3]
             if top_news:
                 report.append("   📋 Top Headlines:")
                 for news in top_news:
