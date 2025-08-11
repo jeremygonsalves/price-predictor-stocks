@@ -109,3 +109,10 @@ stock_alerts.log
 *.csv
 *.json
 !config.json 
+
+# Reports and generated analysis files
+reports/*.txt
+*morning_stock_analysis*.txt
+trading_alerts.txt
+stock_alerts.log
+morning_stock_analysis.log 

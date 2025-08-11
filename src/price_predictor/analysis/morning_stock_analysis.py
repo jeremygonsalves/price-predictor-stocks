@@ -101,21 +101,27 @@ class MorningStockAnalyzer:
     def load_alpha_vantage_key(self) -> Optional[str]:
         """Load Alpha Vantage API key using the same logic as enhanced_stock_alert.py"""
         try:
-            # Check for Alpha Vantage key in new secrets directory
-            if os.path.exists('secrets/alphavantage.txt'):
-                with open('secrets/alphavantage.txt', 'r') as f:
-                    api_key = f.read().strip()
-                logger.info("Alpha Vantage API key loaded from secrets/alphavantage.txt")
+            # Check for Alpha Vantage key in new secrets directory or legacy paths
+            candidate_paths = [
+                'secrets/alphavantage.txt',
+                'src/alphavantage.txt',
+                'alphavantage.txt'
+            ]
+            for path in candidate_paths:
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        api_key = f.read().strip()
+                    logger.info(f"Alpha Vantage API key loaded from {path}")
+                    return api_key
+            
+            # Fallback to environment variable
+            api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+            if api_key:
+                logger.info("Alpha Vantage API key loaded from environment variable")
                 return api_key
             else:
-                # Fallback to environment variable
-                api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
-                if api_key:
-                    logger.info("Alpha Vantage API key loaded from environment variable")
-                    return api_key
-                else:
-                    logger.warning("Alpha Vantage API key not found")
-                    return None
+                logger.warning("Alpha Vantage API key not found")
+                return None
         except Exception as e:
             logger.warning(f"Failed to load Alpha Vantage API key: {str(e)}")
             return None
@@ -123,21 +129,23 @@ class MorningStockAnalyzer:
     def init_reddit_client(self) -> Optional[dict]:
         """Initialize Reddit client using the logic from the enhanced_stock_alert.py"""
         try:
-            # Check for Reddit credentials in new secrets directory
-            if (os.path.exists('secrets/pw.txt') and 
-                os.path.exists('secrets/client_id.txt') and 
-                os.path.exists('secrets/client_secret.txt')):
-                
-                with open('secrets/pw.txt', 'r') as f:
+            # Check for Reddit credentials in new secrets directory or legacy paths
+            pw_paths = ['secrets/pw.txt', 'src/pw.txt', 'pw.txt']
+            client_id_paths = ['secrets/client_id.txt', 'src/client_id.txt', 'client_id.txt']
+            client_secret_paths = ['secrets/client_secret.txt', 'src/client_secret.txt', 'client_secret.txt']
+            
+            pw_path = next((p for p in pw_paths if os.path.exists(p)), None)
+            cid_path = next((p for p in client_id_paths if os.path.exists(p)), None)
+            csec_path = next((p for p in client_secret_paths if os.path.exists(p)), None)
+            
+            if pw_path and cid_path and csec_path:
+                with open(pw_path, 'r') as f:
                     pw = f.read().strip()
-                
-                with open('secrets/client_id.txt', 'r') as f:
+                with open(cid_path, 'r') as f:
                     client_id = f.read().strip()
-                
-                with open('secrets/client_secret.txt', 'r') as f:
+                with open(csec_path, 'r') as f:
                     client_secret = f.read().strip()
                 
-                # Use the same authentication logic as the enhanced script
                 auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
                 data = {
                     "grant_type": "password",
@@ -152,8 +160,7 @@ class MorningStockAnalyzer:
                 if res.status_code == 200:
                     token = res.json()['access_token']
                     headers = {**headers, **{'Authorization': f"bearer {token}"}}
-                    
-                    logger.info("Reddit API client initialized successfully using secrets credentials")
+                    logger.info("Reddit API client initialized successfully using credentials")
                     return {
                         'headers': headers,
                         'token': token,
@@ -163,7 +170,7 @@ class MorningStockAnalyzer:
                     logger.warning(f"Failed to get Reddit token: {res.status_code}")
                     return None
             else:
-                logger.info("Reddit credential files not found in secrets/, sentiment analysis will use dummy data")
+                logger.info("Reddit credential files not found, sentiment analysis will use dummy data")
                 return None
         except Exception as e:
             logger.warning(f"Failed to initialize Reddit client: {str(e)}")
@@ -333,37 +340,72 @@ class MorningStockAnalyzer:
         return dict(stock_news)
     
     def get_yahoo_finance_news(self, start_time: datetime, end_time: datetime) -> Dict[str, List[Dict]]:
-        """Get news from Yahoo Finance"""
+        """Get news from Yahoo Finance with throttling and fallback if time-filter yields nothing"""
         stock_news = defaultdict(list)
         
         try:
             # Get news for major stock categories
             for category, tickers in self.stock_categories.items():
-                for ticker in tickers[:5]:  # Limit to top 5 per category
+                for ticker in tickers[:3]:  # Throttle: fewer tickers per category
                     try:
                         stock = yf.Ticker(ticker)
                         news = stock.news
                         
+                        # Time-filtered collection
                         for article in news:
-                            article_time = datetime.fromtimestamp(article['providerPublishTime'])
+                            try:
+                                article_time = datetime.fromtimestamp(article['providerPublishTime'])
+                            except Exception:
+                                continue
                             
                             if start_time <= article_time <= end_time:
                                 stock_news[ticker].append({
                                     'source': 'yahoofinance',
-                                    'title': article['title'],
+                                    'title': article.get('title', ''),
                                     'summary': article.get('summary', ''),
-                                    'url': article['link'],
+                                    'url': article.get('link', ''),
                                     'timestamp': article_time,
-                                    'sentiment': self.analyze_sentiment(article['title'] + ' ' + article.get('summary', '')),
+                                    'sentiment': self.analyze_sentiment((article.get('title') or '') + ' ' + (article.get('summary') or '')),
                                     'publisher': article.get('publisher', 'Unknown')
                                 })
-                    
+                        
+                        # Gentle sleep to avoid rate limits
+                        time_module.sleep(0.35)
                     except Exception as e:
                         logger.warning(f"Error getting Yahoo Finance news for {ticker}: {str(e)}")
                         continue
         
         except Exception as e:
             logger.error(f"Error in Yahoo Finance analysis: {str(e)}")
+        
+        # Fallback: if nothing collected in window, include most recent headlines without time filter (top 2 per ticker)
+        if not stock_news:
+            try:
+                for category, tickers in self.stock_categories.items():
+                    for ticker in tickers[:2]:
+                        try:
+                            stock = yf.Ticker(ticker)
+                            news = stock.news
+                            for article in news[:2]:
+                                try:
+                                    article_time = datetime.fromtimestamp(article['providerPublishTime'])
+                                except Exception:
+                                    article_time = end_time
+                                stock_news[ticker].append({
+                                    'source': 'yahoofinance',
+                                    'title': article.get('title', ''),
+                                    'summary': article.get('summary', ''),
+                                    'url': article.get('link', ''),
+                                    'timestamp': article_time,
+                                    'sentiment': self.analyze_sentiment((article.get('title') or '') + ' ' + (article.get('summary') or '')),
+                                    'publisher': article.get('publisher', 'Unknown')
+                                })
+                            time_module.sleep(0.35)
+                        except Exception as e:
+                            logger.warning(f"Fallback Yahoo Finance fetch failed for {ticker}: {str(e)}")
+                            continue
+            except Exception as e:
+                logger.error(f"Fallback Yahoo Finance analysis failed: {str(e)}")
         
         return dict(stock_news)
     
