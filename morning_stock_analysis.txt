@@ -1,118 +1,138 @@
-🚀 **MORNING STOCK ANALYSIS REPORT** 🚀
-📅 Analysis Date: 2025-08-11 09:25
-⏰ Time Range: 08/10 16:00 - 08/11 08:00
-📊 Stocks Analyzed: 366
-📈 Stocks with Sufficient News: 62
+**Morning Stock Analysis Report**
+Analysis Date: 2025-08-11 09:34
+Time Range: 08/10 16:00 - 08/11 08:00
+Stocks Analyzed: 355
+Stocks with Sufficient News: 56
 
-🔥 **TOP STOCKS TO WATCH TODAY** 🔥
+**Top stocks to watch today**
 
-**1. AMD** (Score: 53.95)
-   💰 Price: $172.76 (📈 +0.21%)
+**1. AMD** (Score: 54.20)
+   💰 Price: $169.84 (📉 -1.69%)
    🏢 Sector: Technology
    📰 News Count: 13
-   😊 Sentiment: 0.09
-   💡 Reason: 13 news mentions; high Reddit engagement (456)
+   Sentiment: +0.09
+   💡 Reason: 13 news mentions; high Reddit engagement (460)
+   Outlook: Likely Fall — sentiment +0.09; news 13; momentum -1.7%
+   Summary: Positive sentiment with limited coverage and downward momentum.
    📋 Top Headlines:
       • Trump Administration to Take 15% Cut of Nvidia and AMD Chip Sales to China
       • NVDA and AMD hit with 15% Tariff on China Revenues
       • Nvidia and AMD to pay 15% of China chip sale revenues to US government
 
-**2. TSLA** (Score: 31.92)
-   💰 Price: $329.65 (📈 +2.29%)
+**2. RDDT** (Score: 29.04)
+   💰 Price: $212.43 (📉 -1.40%)
+   🏢 Sector: Communication Services
+   📰 News Count: 3
+   Sentiment: +0.23
+   💡 Reason: 3 news mentions; positive sentiment (0.23); high Reddit engagement (227)
+   Outlook: Likely Rise — sentiment +0.23; news 3; momentum -1.4%
+   Summary: Positive sentiment with limited coverage and downward momentum.
+   📋 Top Headlines:
+      • Roth IRA 20k -&gt; 380k stocks only
+      • Comment on: Roth IRA 20k -&gt; 380k stocks only
+      • Comment on: Roth IRA 20k -&gt; 380k stocks only
+
+**3. TSLA** (Score: 28.96)
+   💰 Price: $340.18 (📈 +3.20%)
    🏢 Sector: Consumer Cyclical
-   📰 News Count: 10
-   😊 Sentiment: 0.14
-   💡 Reason: 10 news mentions; positive sentiment (0.14); high Reddit engagement (247); significant price movement (2.3%)
+   📰 News Count: 4
+   Sentiment: +0.08
+   💡 Reason: 4 news mentions; high Reddit engagement (253); significant price movement (3.2%)
+   Outlook: Likely Rise — sentiment +0.08; news 4; momentum +3.2%
+   Summary: Positive sentiment with limited coverage and upward momentum.
    📋 Top Headlines:
       • Data not gonna lie.
       • CENTENE (CNC) is a good long term opportunity at this level
       • Comment on: Can someone that invested since the 80s tell us how they did it back...
 
-**3. RDDT** (Score: 28.20)
-   💰 Price: $215.44 (📈 +1.71%)
-   🏢 Sector: Communication Services
-   📰 News Count: 3
-   😊 Sentiment: 0.23
-   💡 Reason: 3 news mentions; positive sentiment (0.23); high Reddit engagement (218)
-   📋 Top Headlines:
-      • Roth IRA 20k -&gt; 380k stocks only
-      • Comment on: Roth IRA 20k -&gt; 380k stocks only
-      • Comment on: Roth IRA 20k -&gt; 380k stocks only
-
-**4. NVDA** (Score: 24.44)
-   💰 Price: $182.70 (📈 +1.07%)
+**4. NVDA** (Score: 24.49)
+   💰 Price: $180.96 (📉 -0.95%)
    🏢 Sector: Technology
    📰 News Count: 17
-   😊 Sentiment: 0.09
-   💡 Reason: 17 news mentions; high Reddit engagement (172)
+   Sentiment: +0.09
+   💡 Reason: 17 news mentions; high Reddit engagement (174)
+   Outlook: Neutral / Range-bound — sentiment +0.09; news 17; momentum -0.9%
+   Summary: Positive sentiment with limited coverage and downward momentum.
    📋 Top Headlines:
       • NVDA and AMD hit with 15% Tariff on China Revenues
       • Data not gonna lie.
       • Comment on: NVDA and AMD hit with 15% Tariff on China Revenues
 
-**5. AI** (Score: 23.85)
-   💰 Price: $22.13 (📉 -2.34%)
-   🏢 Sector: Technology
-   📰 News Count: 26
-   😊 Sentiment: 0.15
-   💡 Reason: 26 news mentions; positive sentiment (0.15); high Reddit engagement (131); significant price movement (-2.3%)
-   📋 Top Headlines:
-      • Trump Administration to Take 15% Cut of Nvidia and AMD Chip Sales to China
-      • Nvidia and AMD to pay 15% of China chip sale revenues to US government
-      • Comment on: Trump Administration to Take 15% Cut of Nvidia and AMD Chip Sales to...
-
-**6. GOOGL** (Score: 21.91)
-   💰 Price: $201.42 (📈 +2.49%)
+**5. GOOGL** (Score: 21.65)
+   💰 Price: $200.27 (📉 -0.57%)
    🏢 Sector: Communication Services
    📰 News Count: 5
-   😊 Sentiment: 0.07
-   💡 Reason: 5 news mentions; high Reddit engagement (186); significant price movement (2.5%)
+   Sentiment: +0.07
+   💡 Reason: 5 news mentions; high Reddit engagement (186)
+   Outlook: Neutral / Range-bound — sentiment +0.07; news 5; momentum -0.6%
+   Summary: Positive sentiment with limited coverage and downward momentum.
    📋 Top Headlines:
       • Comment on: My biggest trade yet, doesn’t feel real to be doing this at 22 years...
       • Exit GOOG/GOOGL or Hold Through Remedies Ruling?
       • Comment on: Exit GOOG/GOOGL or Hold Through Remedies Ruling?
 
-**7. PLTR** (Score: 19.24)
-   💰 Price: $186.96 (📈 +2.61%)
+**6. AI** (Score: 20.85)
+   💰 Price: $15.23 (📉 -31.18%)
+   🏢 Sector: Technology
+   📰 News Count: 27
+   Sentiment: +0.15
+   💡 Reason: 27 news mentions; positive sentiment (0.15); high Reddit engagement (126); significant price movement (-31.2%)
+   Outlook: Likely Rise — sentiment +0.15; news 27; momentum -31.2%
+   Summary: Positive sentiment with limited coverage and downward momentum.
+   📋 Top Headlines:
+      • Trump Administration to Take 15% Cut of Nvidia and AMD Chip Sales to China
+      • Nvidia and AMD to pay 15% of China chip sale revenues to US government
+      • Comment on: Trump Administration to Take 15% Cut of Nvidia and AMD Chip Sales to...
+
+**7. PLTR** (Score: 19.27)
+   💰 Price: $183.64 (📉 -1.77%)
    🏢 Sector: Technology
    📰 News Count: 7
-   😊 Sentiment: 0.12
-   💡 Reason: 7 news mentions; positive sentiment (0.12); high Reddit engagement (148); significant price movement (2.6%)
+   Sentiment: +0.12
+   💡 Reason: 7 news mentions; positive sentiment (0.12); high Reddit engagement (152)
+   Outlook: Likely Rise — sentiment +0.12; news 7; momentum -1.8%
+   Summary: Positive sentiment with limited coverage and downward momentum.
    📋 Top Headlines:
       • Data not gonna lie.
-      • CENTENE (CNC) is a good long term opportunity at this level
       • Comment on: Palantir’s 2,500% run has bulls scrambling to justify valuation (Blo...
+      • CENTENE (CNC) is a good long term opportunity at this level
 
-**8. HOOD** (Score: 17.04)
-   💰 Price: $114.63 (📈 +3.06%)
+**8. COIN** (Score: 18.73)
+   💰 Price: $321.50 (📈 +3.53%)
+   🏢 Sector: Financial Services
+   📰 News Count: 6
+   Sentiment: +0.21
+   💡 Reason: 6 news mentions; positive sentiment (0.21); high Reddit engagement (133); significant price movement (3.5%)
+   Outlook: Likely Rise — sentiment +0.21; news 6; momentum +3.5%
+   Summary: Positive sentiment with limited coverage and upward momentum.
+   📋 Top Headlines:
+      • Roth IRA 20k -&gt; 380k stocks only
+      • Comment on: Roth IRA 20k -&gt; 380k stocks only
+      • $COIN PRINT SESSION
+
+**9. HOOD** (Score: 17.40)
+   💰 Price: $114.95 (📈 +0.28%)
    🏢 Sector: Financial Services
    📰 News Count: 5
-   😊 Sentiment: 0.14
-   💡 Reason: 5 news mentions; positive sentiment (0.14); high Reddit engagement (131); significant price movement (3.1%)
+   Sentiment: +0.14
+   💡 Reason: 5 news mentions; positive sentiment (0.14); high Reddit engagement (137)
+   Outlook: Likely Rise — sentiment +0.14; news 5; momentum +0.3%
+   Summary: Positive sentiment with limited coverage and flat momentum.
    📋 Top Headlines:
       • Roth IRA 20k -&gt; 380k stocks only
       • Comment on: Roth IRA 20k -&gt; 380k stocks only
       • Comment on: Roth IRA 20k -&gt; 380k stocks only
 
-**9. US** (Score: 15.83)
+**10. US** (Score: 15.83)
    📰 News Count: 23
-   😊 Sentiment: 0.04
+   Sentiment: +0.04
    💡 Reason: 23 news mentions
+   Outlook: Neutral / Range-bound — sentiment +0.04; news 23; momentum +0.0%
+   Summary: Mixed sentiment with limited coverage and flat momentum.
    📋 Top Headlines:
       • Nvidia and AMD to pay 15% of China chip sale revenues to US government
       • Comment on: Trump Administration Considers Longtime Critic to Lead Bureau of Lab...
       • Comment on: Trump Administration to Take 15% Cut of Nvidia and AMD Chip Sales to...
-
-**10. COIN** (Score: 15.75)
-   💰 Price: $310.54 (📉 -0.08%)
-   🏢 Sector: Financial Services
-   📰 News Count: 7
-   😊 Sentiment: 0.19
-   💡 Reason: 7 news mentions; positive sentiment (0.19); high Reddit engagement (110)
-   📋 Top Headlines:
-      • Roth IRA 20k -&gt; 380k stocks only
-      • $COIN PRINT SESSION
-      • Comment on: Roth IRA 20k -&gt; 380k stocks only
 
 📝 **ANALYSIS SUMMARY**
 This analysis is based on:
