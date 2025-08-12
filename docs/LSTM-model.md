@@ -238,7 +238,7 @@ flowchart TD
     class A,B,C,D,E,F source
     class B1,B2,B3,B4,C1,C2,C3,C4,D1,D2,D3,E1,E2,E3,F1,F2,F3 process
     class G,H result
-```}  الأخير
+```
 
 ## Ensemble Prediction Algorithm Breakdown
 
