@@ -83,6 +83,10 @@ class MorningStockAnalyzer:
         )
         global logger
         logger = logging.getLogger(__name__)
+        # Quiet third-party noisy loggers
+        logging.getLogger("yfinance").setLevel(logging.ERROR)
+        logging.getLogger("urllib3").setLevel(logging.ERROR)
+        logging.getLogger("requests").setLevel(logging.ERROR)
     
     def load_config(self, config_file: str) -> Dict:
         """Load configuration from JSON file"""
@@ -193,89 +197,227 @@ class MorningStockAnalyzer:
         
         return start_date, end_date
     
+    def _fetch_json_with_retry(self, url: str, headers: Dict[str, str], params: Dict, max_retries: int = 3, backoff_seconds: float = 0.8) -> Optional[Dict]:
+        """HTTP GET JSON helper with basic retry/backoff and logging."""
+        last_status = None
+        for attempt in range(max_retries):
+            try:
+                resp = requests.get(url, headers=headers, params=params, timeout=12)
+                last_status = resp.status_code
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    sleep_time = backoff_seconds * (2 ** attempt)
+                    logger.warning(f"HTTP {resp.status_code} from {url}. Backing off {sleep_time:.1f}s (attempt {attempt+1}/{max_retries})")
+                    time_module.sleep(sleep_time)
+                    continue
+                # Non-retryable errors
+                logger.warning(f"HTTP {resp.status_code} from {url}. Not retrying.")
+                return None
+            except Exception as e:
+                sleep_time = backoff_seconds * (2 ** attempt)
+                logger.warning(f"Exception fetching {url}: {e}. Backing off {sleep_time:.1f}s (attempt {attempt+1}/{max_retries})")
+                time_module.sleep(sleep_time)
+        logger.error(f"Failed to fetch {url} after {max_retries} attempts (last status={last_status})")
+        return None
+    
     def get_reddit_stock_mentions(self, start_time: datetime, end_time: datetime) -> Dict[str, List[Dict]]:
         """Get stock mentions from Reddit subreddits using the enhanced script logic"""
-        if not self.reddit_client:
-            return {}
-        
         stock_mentions = defaultdict(list)
         
         try:
-            headers = self.reddit_client['headers']
+            use_oauth = bool(self.reddit_client)
+            oauth_headers = self.reddit_client['headers'] if use_oauth else None
+            public_headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "DNT": "1",
+                "Referer": "https://www.reddit.com/"
+            }
             
             for subreddit_name in self.stock_subreddits:
                 try:
-                    # Get posts from the subreddit using the enhanced script logic
-                    res = requests.get(f"https://oauth.reddit.com/r/{subreddit_name}/new", 
-                                     headers=headers, params={"limit": 100})
+                    kept_count = 0
+                    if use_oauth:
+                        # OAuth-protected endpoints
+                        data = self._fetch_json_with_retry(
+                            f"https://oauth.reddit.com/r/{subreddit_name}/new",
+                            headers=oauth_headers,
+                            params={"limit": 100}
+                        )
+                        posts = data.get('data', {}).get('children', []) if data else []
+                    else:
+                        # Public JSON endpoint
+                        data = self._fetch_json_with_retry(
+                            f"https://api.reddit.com/r/{subreddit_name}/new",
+                            headers=public_headers,
+                            params={"limit": 100, "raw_json": 1}
+                        )
+                        if not data:
+                            data = self._fetch_json_with_retry(
+                                f"https://www.reddit.com/r/{subreddit_name}/new.json",
+                                headers=public_headers,
+                                params={"limit": 100, "raw_json": 1}
+                            )
+                        posts = data.get('data', {}).get('children', []) if data else []
                     
-                    if res.status_code == 200:
-                        posts = res.json()['data']['children']
+                    for post in posts:
+                        post_data = post.get('data', {})
+                        if not post_data:
+                            continue
+                        created_utc = post_data.get('created_utc')
+                        if created_utc is None:
+                            continue
+                        post_time = datetime.fromtimestamp(created_utc)
                         
-                        for post in posts:
-                            post_data = post['data']
-                            post_time = datetime.fromtimestamp(post_data['created_utc'])
+                        if start_time <= post_time <= end_time:
+                            title = post_data.get('title', '')
+                            selftext = post_data.get('selftext', '')
+                            text = f"{title} {selftext}"
+                            tickers = self.extract_stock_tickers(text, validate_online=True)
                             
-                            # Check if post is within our time range
-                            if start_time <= post_time <= end_time:
-                                # Extract stock tickers from title and content
-                                title = post_data.get('title', '')
-                                selftext = post_data.get('selftext', '')
-                                text = f"{title} {selftext}"
-                                tickers = self.extract_stock_tickers(text)
-                                
-                                for ticker in tickers:
-                                    stock_mentions[ticker].append({
-                                        'source': 'reddit',
-                                        'subreddit': subreddit_name,
-                                        'title': title,
-                                        'score': post_data.get('score', 0),
-                                        'comments': post_data.get('num_comments', 0),
-                                        'url': f"https://reddit.com{post_data.get('permalink', '')}",
-                                        'timestamp': post_time,
-                                        'sentiment': self.analyze_sentiment(text)
-                                    })
-                    
-                    # Get comments from hot posts
-                    res = requests.get(f"https://oauth.reddit.com/r/{subreddit_name}/hot", 
-                                     headers=headers, params={"limit": 20})
-                    
-                    if res.status_code == 200:
-                        posts = res.json()['data']['children']
+                            for ticker in tickers:
+                                stock_mentions[ticker].append({
+                                    'source': 'reddit',
+                                    'subreddit': subreddit_name,
+                                    'title': title,
+                                    'score': post_data.get('score', 0),
+                                    'comments': post_data.get('num_comments', 0),
+                                    'url': f"https://reddit.com{post_data.get('permalink', '')}",
+                                    'timestamp': post_time,
+                                    'sentiment': self.analyze_sentiment(text)
+                                })
+                            kept_count += len(tickers)
+ 
+                    # Fetch comments for hot posts for more mentions
+                    if use_oauth:
+                        hot_data = self._fetch_json_with_retry(
+                            f"https://oauth.reddit.com/r/{subreddit_name}/hot",
+                            headers=oauth_headers,
+                            params={"limit": 20}
+                        )
+                        hot_posts = hot_data.get('data', {}).get('children', []) if hot_data else []
+                    else:
+                        hot_data = self._fetch_json_with_retry(
+                            f"https://api.reddit.com/r/{subreddit_name}/hot",
+                            headers=public_headers,
+                            params={"limit": 20, "raw_json": 1}
+                        )
+                        if not hot_data:
+                            hot_data = self._fetch_json_with_retry(
+                                f"https://www.reddit.com/r/{subreddit_name}/hot.json",
+                                headers=public_headers,
+                                params={"limit": 20, "raw_json": 1}
+                            )
+                        hot_posts = hot_data.get('data', {}).get('children', []) if hot_data else []
+ 
+                    for post in hot_posts:
+                        post_data = post.get('data', {})
+                        post_id = post_data.get('id', '')
+                        if not post_id:
+                            continue
                         
-                        for post in posts:
-                            post_data = post['data']
-                            post_id = post_data.get('id', '')
-                            
-                            # Get comments for this post
-                            comments_res = requests.get(f"https://oauth.reddit.com/comments/{post_id}", 
-                                                       headers=headers, params={"limit": 50})
-                            
-                            if comments_res.status_code == 200:
-                                comments_data = comments_res.json()
-                                if len(comments_data) > 1:  # Comments are in the second element
-                                    comments = comments_data[1]['data']['children']
-                                    
-                                    for comment in comments:
-                                        if comment['kind'] == 't1':  # Regular comment
-                                            comment_data = comment['data']
-                                            comment_time = datetime.fromtimestamp(comment_data['created_utc'])
-                                            
-                                            if start_time <= comment_time <= end_time:
-                                                comment_body = comment_data.get('body', '')
-                                                tickers = self.extract_stock_tickers(comment_body)
-                                                
-                                                for ticker in tickers:
-                                                    stock_mentions[ticker].append({
-                                                        'source': 'reddit',
-                                                        'subreddit': subreddit_name,
-                                                        'title': f"Comment on: {post_data.get('title', '')}",
-                                                        'score': comment_data.get('score', 0),
-                                                        'comments': 0,
-                                                        'url': f"https://reddit.com{comment_data.get('permalink', '')}",
-                                                        'timestamp': comment_time,
-                                                        'sentiment': self.analyze_sentiment(comment_body)
-                                                    })
+                        if use_oauth:
+                            comments_data = self._fetch_json_with_retry(
+                                f"https://oauth.reddit.com/comments/{post_id}",
+                                headers=oauth_headers,
+                                params={"limit": 50}
+                            )
+                            comments_list = comments_data[1]['data']['children'] if isinstance(comments_data, list) and len(comments_data) > 1 else []
+                        else:
+                            comments_data = self._fetch_json_with_retry(
+                                f"https://api.reddit.com/comments/{post_id}",
+                                headers=public_headers,
+                                params={"limit": 50, "raw_json": 1}
+                            )
+                            if not comments_data:
+                                comments_data = self._fetch_json_with_retry(
+                                    f"https://www.reddit.com/comments/{post_id}.json",
+                                    headers=public_headers,
+                                    params={"limit": 50, "raw_json": 1}
+                                )
+                            comments_list = comments_data[1]['data']['children'] if isinstance(comments_data, list) and len(comments_data) > 1 else []
+                        
+                        for comment in comments_list:
+                            if comment.get('kind') != 't1':
+                                continue
+                            comment_data = comment.get('data', {})
+                            created_utc = comment_data.get('created_utc')
+                            if created_utc is None:
+                                continue
+                            comment_time = datetime.fromtimestamp(created_utc)
+                            if not (start_time <= comment_time <= end_time):
+                                continue
+                            comment_body = comment_data.get('body', '')
+                            tickers = self.extract_stock_tickers(comment_body, validate_online=True)
+                            for ticker in tickers:
+                                stock_mentions[ticker].append({
+                                    'source': 'reddit',
+                                    'subreddit': subreddit_name,
+                                    'title': f"Comment on: {post_data.get('title', '')}",
+                                    'score': comment_data.get('score', 0),
+                                    'comments': 0,
+                                    'url': f"https://reddit.com{comment_data.get('permalink', '')}",
+                                    'timestamp': comment_time,
+                                    'sentiment': self.analyze_sentiment(comment_body)
+                                })
+                            kept_count += len(tickers)
+
+                    # Also fetch comments for newest posts (captures ticker mentions in early discussions)
+                    for post in posts[:10]:
+                        post_data = post.get('data', {})
+                        post_id = post_data.get('id', '')
+                        if not post_id:
+                            continue
+                        if use_oauth:
+                            comments_data = self._fetch_json_with_retry(
+                                f"https://oauth.reddit.com/comments/{post_id}",
+                                headers=oauth_headers,
+                                params={"limit": 50}
+                            )
+                        else:
+                            comments_data = self._fetch_json_with_retry(
+                                f"https://api.reddit.com/comments/{post_id}",
+                                headers=public_headers,
+                                params={"limit": 50, "raw_json": 1}
+                            )
+                            if not comments_data:
+                                comments_data = self._fetch_json_with_retry(
+                                    f"https://www.reddit.com/comments/{post_id}.json",
+                                    headers=public_headers,
+                                    params={"limit": 50, "raw_json": 1}
+                                )
+                        comments_list = comments_data[1]['data']['children'] if isinstance(comments_data, list) and len(comments_data) > 1 else []
+                        for comment in comments_list:
+                            if comment.get('kind') != 't1':
+                                continue
+                            comment_data = comment.get('data', {})
+                            created_utc = comment_data.get('created_utc')
+                            if created_utc is None:
+                                continue
+                            comment_time = datetime.fromtimestamp(created_utc)
+                            if not (start_time <= comment_time <= end_time):
+                                continue
+                            body = comment_data.get('body', '')
+                            tickers = self.extract_stock_tickers(body, validate_online=True)
+                            for ticker in tickers:
+                                stock_mentions[ticker].append({
+                                    'source': 'reddit',
+                                    'subreddit': subreddit_name,
+                                    'title': f"Comment on: {post_data.get('title', '')}",
+                                    'score': comment_data.get('score', 0),
+                                    'comments': 0,
+                                    'url': f"https://reddit.com{comment_data.get('permalink', '')}",
+                                    'timestamp': comment_time,
+                                    'sentiment': self.analyze_sentiment(body)
+                                })
+                            kept_count += len(tickers)
+
+                    logger.info(f"Reddit r/{subreddit_name}: kept {kept_count} validated tickers in window")
+                     
+                    # Be gentle with rate limits
+                    time_module.sleep(0.3)
                 
                 except Exception as e:
                     logger.warning(f"Error processing subreddit {subreddit_name}: {str(e)}")
@@ -409,28 +551,143 @@ class MorningStockAnalyzer:
         
         return dict(stock_news)
     
-    def extract_stock_tickers(self, text: str) -> List[str]:
+    def extract_stock_tickers(self, text: str, validate_online: bool = False) -> List[str]:
         """Extract stock tickers from text"""
-        # Common stock ticker patterns
-        ticker_pattern = r'\b[A-Z]{1,5}\b'
-        potential_tickers = re.findall(ticker_pattern, text)
-        
-        # Filter out common words that aren't tickers
-        common_words = {
+        # Build and cache helpers on first use
+        if not hasattr(self, '_ticker_validation_cache'):
+            self._ticker_validation_cache = {}
+        if not hasattr(self, '_ticker_normalization_cache'):
+            self._ticker_normalization_cache = {}
+
+        if not text:
+            return []
+
+        original_text = text
+        text = text.strip()
+
+        # Patterns to capture a wide range of ticker styles
+        patterns = [
+            # Cashtags like $TSLA, $SHOP.TO
+            r'\$[A-Za-z][A-Za-z0-9\.-]{0,9}',
+            # Exchange prefixes like NASDAQ:MSFT, TSX:SHOP, NYSE-BABA
+            r'\b(?:NASDAQ|NYSE|AMEX|TSX|TSXV|TSX-V|CSE|OTC|LSE|ASX)[:\-\s]([A-Za-z][A-Za-z0-9\.-]{0,9})\b',
+            # Tickers with class or exchange suffix (.B, -B, .TO, .V, .CN)
+            r'\b[A-Z]{1,5}(?:[\.-](?:[A-Z]{1,3}|TO|V|CN|NE|PA|L|AX))\b'
+        ]
+
+        candidates = set()
+        for pat in patterns:
+            for match in re.findall(pat, text, flags=re.IGNORECASE):
+                # Some patterns use a capturing group; normalize match accordingly
+                raw = match if isinstance(match, str) else match[0]
+                if not raw:
+                    continue
+                candidates.add(raw)
+
+        # Also handle colon-joined tokens discovered by split (defensive)
+        for token in re.split(r'\s+', text):
+            if ':' in token:
+                parts = re.split(r'[:\-]', token)
+                for part in parts:
+                    if part:
+                        candidates.add(part)
+
+        # Small whitelist of common plain-ticker mentions to catch when people omit '$'
+        common_plain_tickers = {
+            'AAPL','MSFT','AMZN','TSLA','NVDA','META','GOOG','GOOGL','AMD','NFLX','INTC','BRK-B','BRK-A',
+            'JPM','BAC','WFC','GS','MS','C','XOM','CVX','V','MA','NKE','DIS','ADBE','CRM','PYPL','T','VZ','PFE'
+        }
+        for word in re.findall(r'\b[A-Z]{2,5}\b', text):
+            if word in common_plain_tickers:
+                candidates.add(word)
+
+        # Common stop words and noise tokens frequently hit by regex
+        common_noise = {
             'THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HER', 'WAS', 'ONE',
             'OUR', 'OUT', 'DAY', 'GET', 'HAS', 'HIM', 'HIS', 'HOW', 'MAN', 'NEW', 'NOW', 'OLD',
-            'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE'
+            'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE',
+            'USA', 'IPO', 'ETF', 'EPS', 'PE', 'EV', 'CEO', 'CFO', 'SEC', 'GDP', 'CPI', 'PPI', 'FED',
+            'OTC', 'TSX', 'TSXV', 'NASDAQ', 'NYSE', 'AMEX', 'LSE', 'ASX', 'IMO', 'FYI',
+            # Short common words and prepositions/pronouns
+            'OF', 'TO', 'IN', 'ON', 'BY', 'IT', 'IS', 'AS', 'AT', 'BE', 'DO', 'GO', 'UP', 'SO', 'MY', 'WE', 'US', 'AM',
+            'ME', 'I', 'HE', 'SHE', 'THEY', 'THEM', 'THEIR', 'YOUR', 'OUR', 'ITS',
+            # Verbs/common nouns often hit
+            'HAVE', 'HAS', 'HAD', 'WILL', 'WOULD', 'SHOULD', 'COULD', 'MAY', 'MIGHT', 'MUST',
+            'FROM', 'WITH', 'WITHOUT', 'ABOUT', 'AFTER', 'BEFORE', 'OVER', 'UNDER', 'BETWEEN', 'INTO', 'ONTO', 'OFF', 'OUT', 'BACK',
+            'MORE', 'MOST', 'LESS', 'LEAST', 'GOOD', 'BEST', 'BETTER', 'WORST',
+            'YEAR', 'YEARS', 'MONTH', 'MONTHS', 'WEEK', 'WEEKS', 'DAYS', 'TODAY', 'YESTERDAY', 'TOMORROW',
+            'LIKE', 'RIGHT', 'LEFT', 'TAKE', 'TAKES', 'TAKEN', 'GET', 'GOT', 'GOING', 'HERE', 'THERE',
+            'THIS', 'THAT', 'THESE', 'THOSE', 'BUY', 'SELL', 'HOLD', 'PRICE', 'SALES', 'REVENUE', 'EARNINGS', 'REPORT', 'DATE', 'FULL',
+            # Months abbreviations
+            'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'SEPT', 'OCT', 'NOV', 'DEC',
+            # Common countries/orgs that may appear capitalized
+            'USA', 'US', 'UK', 'EU', 'JAPAN', 'CHINA', 'SEC'
         }
+
+        def normalize_symbol(raw_symbol: str) -> str:
+            s = raw_symbol.strip()
+            if s.startswith('$'):
+                s = s[1:]
+            s = s.upper()
+            # Remove surrounding punctuation
+            s = s.strip(".,;!?)\"':(")
+            # If it looks like EXCHANGE:TICKER, strip leading exchange that slipped through
+            s = re.sub(r'^(?:NASDAQ|NYSE|AMEX|TSX|TSXV|TSX\-V|CSE|OTC|LSE|ASX)[:\-\s]+', '', s)
+            # Convert class tickers like BRK.B to Yahoo style BRK-B (but keep Canadian suffixes with dot)
+            if '.' in s:
+                parts = s.split('.')
+                if len(parts) == 2 and parts[1] not in {'TO', 'V', 'CN', 'NE', 'PA', 'L', 'AX'}:
+                    s = parts[0] + '-' + parts[1]
+            # Extra safety: strip any lingering leading '$'
+            if s.startswith('$'):
+                s = s[1:]
+            return s
+
+        def looks_like_ticker(sym: str) -> bool:
+            # Allow 1-5 alphanumerics with optional class or exchange suffix
+            if sym in common_noise:
+                return False
+            # Base symbol portion
+            m = re.match(r'^[A-Z]{1,5}(?:-[A-Z]{1,3})?(?:\.(?:TO|V|CN|NE|PA|L|AX))?$', sym)
+            if not m:
+                return False
+            # Heuristic: drop most 1-letter tokens except a small allowlist
+            if len(sym) == 1 and sym not in {'F', 'T', 'C', 'A', 'B', 'K', 'M'}:
+                return False
+            return m is not None
+
+        def validate_via_yfinance(sym: str) -> bool:
+            if sym in self._ticker_validation_cache:
+                return self._ticker_validation_cache[sym]
+            try:
+                ticker = yf.Ticker(sym)
+                hist = ticker.history(period="5d")
+                is_valid = not hist.empty
+            except Exception:
+                is_valid = False
+            self._ticker_validation_cache[sym] = is_valid
+            return is_valid
         
-        # Filter out words that are too short or too long
-        valid_tickers = []
-        for ticker in potential_tickers:
-            if (len(ticker) >= 2 and len(ticker) <= 5 and 
-                ticker not in common_words and 
-                ticker.isalpha()):
-                valid_tickers.append(ticker)
-        
-        return list(set(valid_tickers))
+        # Expose validator for reuse
+        self._validate_symbol_online = validate_via_yfinance
+
+        normalized = set()
+        for cand in candidates:
+            sym = normalize_symbol(cand)
+            if not sym:
+                continue
+            if not looks_like_ticker(sym):
+                continue
+            normalized.add(sym)
+
+        if validate_online:
+            validated = []
+            for sym in normalized:
+                if validate_via_yfinance(sym):
+                    validated.append(sym)
+            return validated
+        else:
+            return list(normalized)
     
     def analyze_sentiment(self, text: str) -> float:
         """Analyze sentiment of text using TextBlob"""
@@ -574,22 +831,48 @@ class MorningStockAnalyzer:
             all_stock_news[ticker].extend(news)
         
         logger.info(f"Collected news data for {len(all_stock_news)} stocks")
+
+        # Prefilter: drop obvious non-tickers and validate online for frequent mentions to reduce noise
+        filtered_stock_news = {}
+        for ticker, news_items in all_stock_news.items():
+            # Skip if mentions are below threshold; they won't be scored anyway
+            if len(news_items) < self.min_news_count:
+                continue
+            # Format and quick pattern check (reuse extraction logic on the symbol itself)
+            extracted = self.extract_stock_tickers(ticker, validate_online=False)
+            if not extracted or extracted[0] != ticker:
+                continue
+            # Online validate with cache
+            try:
+                if hasattr(self, '_validate_symbol_online'):
+                    is_valid = self._validate_symbol_online(ticker)
+                else:
+                    # Fallback to direct validation if helper not set
+                    t = yf.Ticker(ticker)
+                    is_valid = not t.history(period="5d").empty
+            except Exception:
+                is_valid = False
+            if not is_valid:
+                continue
+            filtered_stock_news[ticker] = news_items
+
+        all_stock_news = filtered_stock_news
+        logger.info(f"After validation, {len(all_stock_news)} tickers remain for scoring")
         
         # Calculate scores for each stock
         stock_scores = {}
         for ticker, news_data in all_stock_news.items():
-            if len(news_data) >= self.min_news_count:
-                price_data = self.get_stock_price_data(ticker)
-                score_data = self.calculate_stock_score(ticker, news_data, price_data)
-                
-                if score_data['score'] > 0:
-                    stock_scores[ticker] = {
-                        'score': score_data['score'],
-                        'news_data': news_data,
-                        'price_data': price_data,
-                        'score_details': score_data,
-                        'total_news': len(news_data)
-                    }
+            price_data = self.get_stock_price_data(ticker)
+            score_data = self.calculate_stock_score(ticker, news_data, price_data)
+            
+            if score_data['score'] > 0:
+                stock_scores[ticker] = {
+                    'score': score_data['score'],
+                    'news_data': news_data,
+                    'price_data': price_data,
+                    'score_details': score_data,
+                    'total_news': len(news_data)
+                }
         
         # Sort stocks by score and get top performers
         sorted_stocks = sorted(stock_scores.items(), key=lambda x: x[1]['score'], reverse=True)

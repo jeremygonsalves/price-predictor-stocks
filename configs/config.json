@@ -1,5 +1,5 @@
 {
-    "ticker": "TD",
+    "ticker": "AMD",
     "lookback_days": 10,
     "prediction_hours": 4,
     "alert_time": "12:00",

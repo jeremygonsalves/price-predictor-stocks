@@ -62,6 +62,9 @@ class EnhancedStockPredictor:
         self.slack_webhook_url = os.getenv('SLACK_WEBHOOK_URL')
         self.slack_bot_token = os.getenv('SLACK_BOT_TOKEN')
         
+        # Initialize currency settings for proper display/conversion
+        self.init_currency_settings()
+        
         logger.info(f"Enhanced Stock Predictor initialized for {self.ticker}")
     
     def load_config(self, config_file: str) -> Dict:
@@ -169,6 +172,81 @@ class EnhancedStockPredictor:
         except Exception as e:
             logger.warning(f"Failed to initialize Reddit client: {str(e)}")
             return None
+    
+    # --------------------- Currency utilities ---------------------
+    def init_currency_settings(self) -> None:
+        """Initialize currency settings for display and conversion."""
+        try:
+            stock = yf.Ticker(self.ticker)
+            info = {}
+            try:
+                info = stock.info or {}
+            except Exception:
+                info = {}
+            self.quote_currency = (info.get('currency') or 'USD').upper()
+            # Always display in the stock's native quote currency
+            self.display_currency = self.quote_currency
+            self.currency_symbol = self.get_currency_symbol(self.display_currency)
+            self._fx_rate = self.get_fx_rate(self.quote_currency, self.display_currency)
+            logger.info(f"Currency settings: quote={self.quote_currency}, display={self.display_currency}, fx_rate={self._fx_rate:.6f}")
+        except Exception as e:
+            self.quote_currency = 'USD'
+            self.display_currency = 'USD'
+            self.currency_symbol = '$'
+            self._fx_rate = 1.0
+            logger.warning(f"Failed to initialize currency settings: {str(e)}")
+    
+    def get_currency_symbol(self, currency_code: str) -> str:
+        mapping = {
+            'USD': '$',
+            'CAD': 'C$',
+            'EUR': '€',
+            'GBP': '£',
+            'JPY': '¥',
+            'AUD': 'A$',
+            'CHF': 'CHF',
+            'HKD': 'HK$',
+            'INR': '₹'
+        }
+        return mapping.get(currency_code.upper(), currency_code.upper() + ' ')
+    
+    def get_fx_rate(self, from_currency: str, to_currency: str) -> float:
+        """Fetch FX spot rate from Yahoo to convert from -> to. Returns 1.0 on failure or same currency."""
+        try:
+            if not from_currency or not to_currency or from_currency.upper() == to_currency.upper():
+                return 1.0
+            pair = f"{from_currency.upper()}{to_currency.upper()}=X"
+            data = yf.download(pair, period="1d", interval="1d", progress=False)
+            if data is not None and not data.empty:
+                rate = float(data['Close'].iloc[-1])
+                if rate > 0:
+                    return rate
+            # Try inverse pair
+            inv_pair = f"{to_currency.upper()}{from_currency.upper()}=X"
+            inv_data = yf.download(inv_pair, period="1d", interval="1d", progress=False)
+            if inv_data is not None and not inv_data.empty:
+                inv_rate = float(inv_data['Close'].iloc[-1])
+                if inv_rate > 0:
+                    return 1.0 / inv_rate
+        except Exception:
+            pass
+        return 1.0
+    
+    def apply_currency_conversion(self, amount: float) -> float:
+        try:
+            return float(amount) * float(self._fx_rate)
+        except Exception:
+            return amount
+    
+    def format_currency(self, amount: float) -> str:
+        converted = self.apply_currency_conversion(amount)
+        # If we have a standard symbol (like $, C$), use it; otherwise append code at end
+        symbol = self.currency_symbol
+        if symbol.endswith(' '):
+            return f"{converted:.2f} {self.display_currency}"
+        else:
+            return f"{symbol}{converted:.2f}"
+    # ------------------- End currency utilities -------------------
     
     def get_reddit_sentiment(self, subreddits: List[str] = None, limit: int = 100) -> pd.DataFrame:
         """Get sentiment data from Reddit using the notebook logic"""
@@ -736,59 +814,108 @@ class EnhancedStockPredictor:
             logger.error(f"Error training model: {str(e)}")
             raise
     
+    def _safe_to_float(self, value, default: float = 0.0) -> float:
+        """Best-effort conversion of various array-like/scalar types to a positive finite float."""
+        try:
+            if value is None:
+                return default
+            # Unbox common containers
+            if isinstance(value, pd.DataFrame):
+                if 'Close' in value.columns and not value['Close'].empty:
+                    value = value['Close'].iloc[-1]
+                else:
+                    numeric = value.select_dtypes(include=[np.number])
+                    value = numeric.stack().iloc[-1] if not numeric.empty else default
+            if isinstance(value, pd.Series):
+                if not value.empty:
+                    value = value.iloc[-1]
+                else:
+                    return default
+            if isinstance(value, (list, tuple, np.ndarray)):
+                arr = np.array(value).ravel()
+                if arr.size == 0:
+                    return default
+                value = arr[-1]
+            result = float(value)
+            if not np.isfinite(result) or result <= 0:
+                return default
+            return result
+        except Exception:
+            return default
+    
     def get_current_price(self) -> float:
         """Get current stock price using multiple methods for accuracy"""
         try:
             logger.info(f"Fetching current price for {self.ticker}...")
-            
-            # Simple, direct approach - get the most recent price available
             stock = yf.Ticker(self.ticker)
-            
-            # Method 1: Try to get the most recent close price directly
+
+            # Method 1: Use fast_info last price
             try:
-                # Get the last N days of data to ensure we have recent data
-                current_price_days = self.config.get('current_price_days', 5)
-                data = yf.download(self.ticker, period=f"{current_price_days}d", progress=False)
-                if not data.empty and len(data) > 0:
-                    current_price = data['Close'].iloc[-1]
-                    logger.info(f"Got current price from recent data: ${current_price:.2f}")
-                    return current_price
+                fast_info = getattr(stock, 'fast_info', {}) or {}
+                for key in ['last_price', 'lastPrice', 'regularMarketPrice']:
+                    if key in fast_info and fast_info[key]:
+                        price = self._safe_to_float(fast_info[key])
+                        if price > 0:
+                            logger.info(f"Got current price from fast_info ({key}): {self.format_currency(price)}")
+                            return price
             except Exception as e:
-                logger.warning(f"Failed to get recent data: {str(e)}")
-            
-            # Method 2: Try stock info
+                logger.warning(f"fast_info unavailable: {str(e)}")
+
+            # Method 2: High-resolution recent history (1m)
             try:
-                info = stock.info
-                if 'regularMarketPrice' in info and info['regularMarketPrice']:
-                    current_price = info['regularMarketPrice']
-                    logger.info(f"Got current price from stock info: ${current_price:.2f}")
-                    return current_price
-                elif 'previousClose' in info and info['previousClose']:
-                    current_price = info['previousClose']
-                    logger.info(f"Got previous close price: ${current_price:.2f}")
-                    return current_price
+                hist = stock.history(period="1d", interval="1m", auto_adjust=True)
+                price = self._safe_to_float(hist['Close'] if 'Close' in hist else hist)
+                if price > 0:
+                    logger.info(f"Got current price from 1m history: {self.format_currency(price)}")
+                    return price
+            except Exception as e:
+                logger.warning(f"Failed to get 1m history: {str(e)}")
+
+            # Method 3: Recent daily download
+            try:
+                current_price_days = int(self.config.get('current_price_days', 5))
+                data = yf.download(self.ticker, period=f"{current_price_days}d", progress=False, auto_adjust=True)
+                price = self._safe_to_float(data['Close'] if 'Close' in data else data)
+                if price > 0:
+                    logger.info(f"Got current price from recent daily data: {self.format_currency(price)}")
+                    return price
+            except Exception as e:
+                logger.warning(f"Failed to get recent daily data: {str(e)}")
+
+            # Method 4: Stock info dict
+            try:
+                info = stock.info or {}
+                for key in ['regularMarketPrice', 'previousClose']:
+                    if key in info and info[key]:
+                        price = self._safe_to_float(info[key])
+                        if price > 0:
+                            logger.info(f"Got current price from info ({key}): {self.format_currency(price)}")
+                            return price
             except Exception as e:
                 logger.warning(f"Failed to get stock info: {str(e)}")
-            
-            # Method 3: Try with different parameters
+
+            # Method 5: Date range fallback
             try:
-                # Use config value for date range fallback
-                date_range_days = self.config.get('date_range_days', 7)
-                data = yf.download(self.ticker, start=(datetime.now() - timedelta(days=date_range_days)).strftime('%Y-%m-%d'), 
-                                 end=datetime.now().strftime('%Y-%m-%d'), progress=False)
-                if not data.empty and len(data) > 0:
-                    current_price = data['Close'].iloc[-1]
-                    logger.info(f"Got current price from date range: ${current_price:.2f}")
-                    return current_price
+                date_range_days = int(self.config.get('date_range_days', 7))
+                data = yf.download(
+                    self.ticker,
+                    start=(datetime.now() - timedelta(days=date_range_days)).strftime('%Y-%m-%d'),
+                    end=datetime.now().strftime('%Y-%m-%d'),
+                    progress=False,
+                    auto_adjust=True
+                )
+                price = self._safe_to_float(data['Close'] if 'Close' in data else data)
+                if price > 0:
+                    logger.info(f"Got current price from date-range data: {self.format_currency(price)}")
+                    return price
             except Exception as e:
-                logger.warning(f"Failed to get date range data: {str(e)}")
-            
+                logger.warning(f"Failed to get date-range data: {str(e)}")
+
             logger.error(f"Could not get current price for {self.ticker}")
-            return 0
-            
+            return 0.0
         except Exception as e:
             logger.error(f"Error getting current price for {self.ticker}: {str(e)}")
-            return 0
+            return 0.0
     
     def predict_future_price(self) -> float:
         """Predict the stock price using enhanced ensemble methods"""
@@ -899,14 +1026,14 @@ class EnhancedStockPredictor:
             predicted_price = current_price * (1 + prediction_change)
             
             # Log detailed analysis
-            logger.info(f"Current price: ${current_price:.2f}")
-            logger.info(f"MA5: ${ma_5:.2f}, MA10: ${ma_10:.2f}, MA20: ${ma_20:.2f}")
+            logger.info(f"Current price: {self.format_currency(current_price)}")
+            logger.info(f"MA5: {self.format_currency(ma_5)}, MA10: {self.format_currency(ma_10)}, MA20: {self.format_currency(ma_20)}")
             logger.info(f"Avg daily return: {avg_daily_return:.4f}")
             logger.info(f"Volatility: {volatility:.4f}")
             logger.info(f"RSI factor: {rsi_factor:.4f}")
             logger.info(f"Trend: {trend_factor:.4f}, Momentum: {momentum_factor:.4f}")
             logger.info(f"Sentiment impact: {sentiment_impact:.4f}")
-            logger.info(f"Final prediction: ${predicted_price:.2f} ({prediction_change:+.4f})")
+            logger.info(f"Final prediction: {self.format_currency(predicted_price)} ({prediction_change:+.4f})")
             
             return predicted_price
             
@@ -925,7 +1052,7 @@ class EnhancedStockPredictor:
                     import random
                     change = random.uniform(-0.005, 0.005)
                     predicted_price = current_price * (1 + change)
-                    logger.info(f"Fallback prediction: ${predicted_price:.2f} ({change:+.4f})")
+                    logger.info(f"Fallback prediction: {self.format_currency(predicted_price)} ({change:+.4f})")
                     return predicted_price
             except Exception as fallback_error:
                 logger.error(f"Fallback prediction failed: {str(fallback_error)}")
@@ -935,10 +1062,10 @@ class EnhancedStockPredictor:
     def generate_trading_signal(self) -> Dict[str, any]:
         """Generate buy/sell signal based on prediction"""
         try:
-            current_price = self.get_current_price()
-            predicted_price = self.predict_future_price()
-            
-            if current_price == 0:
+            current_price = self._safe_to_float(self.get_current_price(), default=0.0)
+            predicted_price = self._safe_to_float(self.predict_future_price(), default=0.0)
+
+            if not np.isfinite(current_price) or current_price <= 0:
                 return {
                     'signal': 'ERROR',
                     'reason': f'Unable to get current price for {self.ticker}. Please check if the ticker symbol is correct and the market is open.',
@@ -947,7 +1074,7 @@ class EnhancedStockPredictor:
                     'confidence': 0.0
                 }
             
-            if predicted_price == 0:
+            if not np.isfinite(predicted_price) or predicted_price <= 0:
                 return {
                     'signal': 'ERROR',
                     'reason': f'Unable to predict future price for {self.ticker}. This may be due to insufficient historical data or model training issues.',
@@ -1019,8 +1146,8 @@ class EnhancedStockPredictor:
 {emoji} STOCK ALERT: {self.ticker} {emoji}
 
 Alert Time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} EST
-Current Price: ${signal_data['current_price']:.2f}
-Predicted Price (4PM EST): ${signal_data['predicted_price']:.2f}
+Current Price: {self.format_currency(signal_data['current_price'])}
+Predicted Price (4PM EST): {self.format_currency(signal_data['predicted_price'])}
 Expected Change: {signal_data.get('price_change_pct', 0):.2f}%
 Signal: {signal_data['signal']}
 Confidence: {signal_data['confidence']:.1%}
@@ -1103,7 +1230,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             price_change_5d = ((current_price - stock_data['Close'].iloc[-6]) / stock_data['Close'].iloc[-6]) * 100
             
             analysis = f"""
-• Moving Averages: MA5: ${ma_5:.2f} | MA10: ${ma_10:.2f} | MA20: ${ma_20:.2f}
+• Moving Averages: MA5: {self.format_currency(ma_5)} | MA10: {self.format_currency(ma_10)} | MA20: {self.format_currency(ma_20)}
 • RSI: {rsi:.1f} ({'Overbought' if rsi > 70 else 'Oversold' if rsi < 30 else 'Neutral'})
 • MACD: {macd:.2f} ({'Bullish' if macd > 0 else 'Bearish'})
 • Bollinger Position: {bb_position:.2%} ({'Upper Band' if bb_position > 0.8 else 'Lower Band' if bb_position < 0.2 else 'Middle Range'})
@@ -1164,7 +1291,13 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 industry = info.get('industry', 'Unknown')
                 
                 if market_cap > 0:
-                    market_cap_str = f"${market_cap/1e9:.1f}B" if market_cap >= 1e9 else f"${market_cap/1e6:.1f}M"
+                    mc_converted = self.apply_currency_conversion(market_cap)
+                    if mc_converted >= 1e9:
+                        market_cap_str = f"{self.currency_symbol}{mc_converted/1e9:.1f}B"
+                    elif mc_converted >= 1e6:
+                        market_cap_str = f"{self.currency_symbol}{mc_converted/1e6:.1f}M"
+                    else:
+                        market_cap_str = f"{self.format_currency(mc_converted)}"
                     sentiment_info.append(f"• Market Cap: {market_cap_str} | Sector: {sector}")
                 
                 # Analyst recommendations
@@ -1539,26 +1672,37 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         """Get impact of upcoming earnings on sentiment"""
         try:
             # This would integrate with earnings calendar APIs
-            # For now, we'll use a simple heuristic based on time since last earnings
-            
+            # For now, use a simple heuristic based on a safely parsed next earnings date
             stock = yf.Ticker(self.ticker)
-            info = stock.info
-            
-            # Get earnings dates if available
-            if 'earningsDates' in info and info['earningsDates']:
-                next_earnings = info['earningsDates'][0]
+            info = stock.info or {}
+
+            # Try multiple keys and normalize to a datetime
+            possible = info.get('earningsDate') or info.get('earningsDates')
+            next_earnings = None
+            if possible is not None:
+                try:
+                    # common shapes: [Timestamp, Timestamp] or single Timestamp
+                    if isinstance(possible, (list, tuple)) and len(possible) > 0:
+                        candidate = possible[0]
+                    else:
+                        candidate = possible
+                    if hasattr(candidate, 'to_pydatetime'):
+                        next_earnings = candidate.to_pydatetime()
+                    elif isinstance(candidate, (datetime,)):
+                        next_earnings = candidate
+                except Exception:
+                    next_earnings = None
+
+            if next_earnings:
                 days_until_earnings = (next_earnings - datetime.now()).days
-                
-                # Impact increases as we get closer to earnings
                 if days_until_earnings <= 7:
-                    return 0.1  # Positive impact (earnings anticipation)
+                    return 0.1
                 elif days_until_earnings <= 14:
                     return 0.05
                 else:
                     return 0.0
-            
+
             return 0.0
-            
         except Exception as e:
             logger.error(f"Error getting earnings impact: {str(e)}")
             return 0.0
@@ -1605,37 +1749,37 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             
             # 1. Technical Analysis Model (40% weight)
             try:
-                tech_prediction = self._technical_analysis_prediction(daily_data, intraday_data)
+                tech_prediction = float(self._technical_analysis_prediction(daily_data, intraday_data))
                 predictions.append(tech_prediction)
                 weights.append(0.4)
-                logger.info(f"Technical prediction: ${tech_prediction:.2f}")
+                logger.info(f"Technical prediction: {self.format_currency(tech_prediction)}")
             except Exception as e:
                 logger.warning(f"Technical analysis failed: {str(e)}")
             
             # 2. Sentiment-Based Model (25% weight)
             try:
-                sentiment_prediction = self._sentiment_based_prediction(daily_data, real_time_sentiment)
+                sentiment_prediction = float(self._sentiment_based_prediction(daily_data, real_time_sentiment))
                 predictions.append(sentiment_prediction)
                 weights.append(0.25)
-                logger.info(f"Sentiment prediction: ${sentiment_prediction:.2f}")
+                logger.info(f"Sentiment prediction: {self.format_currency(sentiment_prediction)}")
             except Exception as e:
                 logger.warning(f"Sentiment analysis failed: {str(e)}")
             
             # 3. Microstructure Model (20% weight)
             try:
-                micro_prediction = self._microstructure_prediction(daily_data, microstructure_features)
+                micro_prediction = float(self._microstructure_prediction(daily_data, microstructure_features))
                 predictions.append(micro_prediction)
                 weights.append(0.2)
-                logger.info(f"Microstructure prediction: ${micro_prediction:.2f}")
+                logger.info(f"Microstructure prediction: {self.format_currency(micro_prediction)}")
             except Exception as e:
                 logger.warning(f"Microstructure analysis failed: {str(e)}")
             
             # 4. Mean Reversion Model (15% weight)
             try:
-                reversion_prediction = self._mean_reversion_prediction(daily_data, intraday_data)
+                reversion_prediction = float(self._mean_reversion_prediction(daily_data, intraday_data))
                 predictions.append(reversion_prediction)
                 weights.append(0.15)
-                logger.info(f"Mean reversion prediction: ${reversion_prediction:.2f}")
+                logger.info(f"Mean reversion prediction: {self.format_currency(reversion_prediction)}")
             except Exception as e:
                 logger.warning(f"Mean reversion analysis failed: {str(e)}")
             
@@ -1658,16 +1802,16 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                     confidence_factor = price_std / prediction_std
                     ensemble_prediction = current_price + (ensemble_prediction - current_price) * confidence_factor
                 
-                logger.info(f"Ensemble prediction: ${ensemble_prediction:.2f}")
+                logger.info(f"Ensemble prediction: {self.format_currency(ensemble_prediction)}")
                 return ensemble_prediction
             else:
                 # Fallback to original method
-                logger.warning("Ensemble prediction failed, using fallback method")
-                return self.predict_future_price()
+                logger.warning("Ensemble prediction unavailable, using legacy fallback")
+                return self._legacy_prediction()
                 
         except Exception as e:
             logger.error(f"Enhanced prediction failed: {str(e)}")
-            return self.predict_future_price()
+            return self._legacy_prediction()
     
     def _technical_analysis_prediction(self, daily_data: pd.DataFrame, intraday_data: pd.DataFrame) -> float:
         """Technical analysis-based prediction"""
