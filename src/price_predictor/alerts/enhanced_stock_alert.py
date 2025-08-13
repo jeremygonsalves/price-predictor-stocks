@@ -43,6 +43,8 @@ class EnhancedStockPredictor:
         
         # Initialize components
         self.ticker = self.config['ticker'].upper()
+        # Resolve to proper exchange-specific symbol when base symbol is ambiguous
+        self.ticker = self.resolve_exchange_symbol(self.ticker)
         self.lookback_days = self.config['lookback_days']
         self.prediction_hours = self.config['prediction_hours']
         
@@ -485,7 +487,7 @@ class EnhancedStockPredictor:
             'article_count': np.random.randint(5, 20, len(dates))
         })
     
-    def get_historical_data(self, days: int = None) -> pd.DataFrame:
+    def get_historical_data(self, days: int = None, allow_sparse: bool = False) -> pd.DataFrame:
         """Fetch historical stock data with technical indicators"""
         if days is None:
             days = self.config['lookback_days']
@@ -541,7 +543,11 @@ class EnhancedStockPredictor:
                     logger.error(f"Method 3 failed: {str(e)}")
             
             if data is None or data.empty:
-                raise ValueError(f"No historical data found for {self.ticker}")
+                if allow_sparse:
+                    logger.warning(f"No historical data found for {self.ticker}. Returning empty DataFrame (sparse mode).")
+                    return pd.DataFrame()
+                else:
+                    raise ValueError(f"No historical data found for {self.ticker}")
             
             # Reset index and rename columns
             data.reset_index(inplace=True)
@@ -553,10 +559,13 @@ class EnhancedStockPredictor:
             # Minimum required data - use config value or default to 30
             min_required_days = self.config.get('min_required_days', 30)
             if len(data) < min_required_days:
-                raise ValueError(f"Insufficient historical data for {self.ticker}. Only {len(data)} days available, need at least {min_required_days}.")
+                if allow_sparse:
+                    logger.warning(f"Sparse data for {self.ticker}: {len(data)} days < {min_required_days}. Proceeding with sparse mode.")
+                else:
+                    raise ValueError(f"Insufficient historical data for {self.ticker}. Only {len(data)} days available, need at least {min_required_days}.")
             
             # Add technical indicators if enabled
-            if self.config.get('enable_technical_indicators', True):
+            if self.config.get('enable_technical_indicators', True) and not data.empty and len(data) >= 5:
                 data = self.add_technical_indicators(data)
             
             logger.info(f"Successfully fetched {len(data)} days of historical data for {self.ticker}")
@@ -922,12 +931,28 @@ class EnhancedStockPredictor:
         try:
             # Use enhanced prediction if enabled
             if self.config.get('use_enhanced_prediction', True):
-                return self.predict_future_price_enhanced()
+                try:
+                    return self.predict_future_price_enhanced()
+                except Exception as e:
+                    logger.warning(f"Enhanced prediction failed ({e}), attempting sparse-data path...")
+                    # Sparse-data fallback
+                    daily_data = self.get_historical_data(days=self.config['lookback_days'], allow_sparse=True)
+                    intraday_data = self.get_intraday_data(interval="5m", days=1)
+                    return self._predict_with_sparse_data(daily_data, intraday_data)
             else:
                 return self._legacy_prediction()
                 
         except Exception as e:
             logger.error(f"Error in predict_future_price: {str(e)}")
+            # Try sparse-data fallback before legacy
+            try:
+                daily_data = self.get_historical_data(days=self.config['lookback_days'], allow_sparse=True)
+                intraday_data = self.get_intraday_data(interval="5m", days=1)
+                sparse_pred = self._predict_with_sparse_data(daily_data, intraday_data)
+                if sparse_pred > 0:
+                    return sparse_pred
+            except Exception:
+                pass
             return self._legacy_prediction()
     
     def _legacy_prediction(self) -> float:
@@ -936,19 +961,22 @@ class EnhancedStockPredictor:
             logger.info(f"Using legacy prediction for {self.ticker}...")
             
             # Get recent historical data
-            stock_data = self.get_historical_data(days=self.config['lookback_days'])
+            stock_data = self.get_historical_data(days=self.config['lookback_days'], allow_sparse=True)
             
             # Minimum data for prediction - use config value or default to 5
             min_prediction_days = self.config.get('min_prediction_days', 5)
             if stock_data.empty or len(stock_data) < min_prediction_days:
-                raise ValueError(f"Insufficient historical data for prediction. Need at least {min_prediction_days} days.")
+                # Sparse-data fallback instead of raising
+                logger.warning("Insufficient historical data for legacy prediction. Using sparse-data prediction.")
+                intraday_data = self.get_intraday_data(interval="5m", days=1)
+                return self._predict_with_sparse_data(stock_data, intraday_data)
             
             # Get sentiment data for prediction
             sentiment_impact = 0.0
             if self.config.get('enable_sentiment_analysis', True):
                 try:
                     # Get Reddit sentiment
-                    reddit_sentiment = self.get_ticker_specific_sentiment(limit=50)
+                    reddit_sentiment = self.get_ticker_specific_sentiment()
                     if not reddit_sentiment.empty and len(reddit_sentiment) > 0:
                         reddit_polarity = reddit_sentiment['avg_polarity'].mean()
                         reddit_impact = reddit_polarity * 0.05  # 5% max impact
@@ -1043,17 +1071,12 @@ class EnhancedStockPredictor:
             # Conservative fallback
             try:
                 logger.info("Using conservative fallback prediction...")
-                stock_data = self.get_historical_data(days=self.config.get('fallback_days', 5))
-                # Minimum data for fallback prediction - use config value or default to 2
-                min_fallback_days = self.config.get('min_fallback_days', 2)
-                if not stock_data.empty and len(stock_data) >= min_fallback_days:
-                    current_price = stock_data['Close'].iloc[-1]
-                    # Very conservative random change (±0.5%)
-                    import random
-                    change = random.uniform(-0.005, 0.005)
-                    predicted_price = current_price * (1 + change)
-                    logger.info(f"Fallback prediction: {self.format_currency(predicted_price)} ({change:+.4f})")
-                    return predicted_price
+                stock_data = self.get_historical_data(days=self.config.get('fallback_days', 5), allow_sparse=True)
+                intraday_data = self.get_intraday_data(interval="5m", days=1)
+                sparse_pred = self._predict_with_sparse_data(stock_data, intraday_data)
+                if sparse_pred > 0:
+                    logger.info(f"Sparse fallback prediction: {self.format_currency(sparse_pred)}")
+                    return sparse_pred
             except Exception as fallback_error:
                 logger.error(f"Fallback prediction failed: {str(fallback_error)}")
             
@@ -2093,6 +2116,118 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         except Exception as e:
             logger.error(f"Error in ML ensemble prediction: {str(e)}")
             return 0.0
+
+    def _predict_with_sparse_data(self, daily_data: pd.DataFrame, intraday_data: pd.DataFrame) -> float:
+        """Prediction path for very new tickers with limited data."""
+        try:
+            current_price = self._safe_to_float(self.get_current_price(), default=0.0)
+            if current_price <= 0:
+                # Fallback to any last known close from intraday or daily
+                if intraday_data is not None and not intraday_data.empty and 'Close' in intraday_data:
+                    current_price = self._safe_to_float(intraday_data['Close'], default=0.0)
+                if (current_price <= 0) and (daily_data is not None and not daily_data.empty):
+                    current_price = float(daily_data['Close'].iloc[-1])
+            if current_price <= 0:
+                return 0.0
+
+            # Intraday momentum over last 60-120 minutes if available
+            predicted_change = 0.0
+            if intraday_data is not None and not intraday_data.empty and 'Close' in intraday_data:
+                closes = intraday_data['Close'].astype(float).values
+                if len(closes) >= 6:
+                    import numpy as np
+                    recent = closes[-24:] if len(closes) >= 24 else closes
+                    returns = np.diff(recent) / recent[:-1]
+                    # Average recent returns and project moderately into next 4h
+                    avg_ret = float(np.nanmean(returns[-12:])) if len(returns) >= 12 else float(np.nanmean(returns))
+                    # Scale to 4 hours, assuming ~1m per candle if very granular, else dampen
+                    scale = 2.0  # conservative projection multiplier
+                    predicted_change += avg_ret * scale
+            else:
+                # Daily momentum scaled to 4 hours if at least 2 closes
+                if daily_data is not None and not daily_data.empty and len(daily_data) >= 2:
+                    import numpy as np
+                    closes = daily_data['Close'].astype(float).values
+                    daily_ret = (closes[-1] - closes[-2]) / closes[-2]
+                    predicted_change += daily_ret * (4.0 / 6.5)  # scale daily to ~4h
+
+            # Add small sentiment tilt using real-time sentiment if available
+            try:
+                sentiment = self.get_real_time_sentiment()
+                if sentiment:
+                    # Weighted average of provided components
+                    weights = {'news_sentiment': 0.3, 'social_sentiment': 0.4, 'earnings_impact': 0.2, 'analyst_impact': 0.05, 'options_sentiment': 0.05}
+                    total_w = 0.0
+                    total_s = 0.0
+                    for k, w in weights.items():
+                        if k in sentiment:
+                            total_s += float(sentiment[k]) * w
+                            total_w += w
+                    avg_s = (total_s / total_w) if total_w > 0 else 0.0
+                    predicted_change += avg_s * 0.01  # max 1% influence
+            except Exception:
+                pass
+
+            # Clamp to conservative bounds
+            predicted_change = max(-0.03, min(0.03, predicted_change))
+            return current_price * (1.0 + predicted_change)
+        except Exception as e:
+            logger.warning(f"Sparse-data prediction failed: {e}")
+            return 0.0
+
+    def resolve_exchange_symbol(self, symbol: str) -> str:
+        """Resolve a base symbol to a specific exchange listing to ensure correct currency.
+        If the symbol already includes an exchange suffix, return as-is.
+        Prefer Canadian TSX/TSXV listings when available for dual-listed names.
+        """
+        try:
+            # If already has known suffix, keep it
+            known_suffixes = ('.TO', '.V', '.CN', '.NE', '.PA', '.L', '.AX')
+            if any(symbol.endswith(sfx) for sfx in known_suffixes):
+                return symbol
+
+            base = symbol
+            def _valid(sym: str):
+                try:
+                    t = yf.Ticker(sym)
+                    hist = t.history(period="5d")
+                    cur = (t.info or {}).get('currency')
+                    return (not hist.empty), (cur.upper() if isinstance(cur, str) else None)
+                except Exception:
+                    return False, None
+
+            # Check base symbol first
+            base_ok, base_ccy = _valid(base)
+            # Probe common Canadian suffixes
+            candidates = [base + '.TO', base + '.V', base + '.CN', base + '.NE']
+            for cand in candidates:
+                ok, ccy = _valid(cand)
+                if ok and ccy in {'CAD'}:
+                    logger.info(f"Resolved {base} to Canadian listing {cand} ({ccy})")
+                    return cand
+
+            # Probe other major non-USD markets for proper currency mapping
+            other_candidates = [
+                (base + '.L', 'GBP'),
+                (base + '.PA', 'EUR'),
+                (base + '.AX', 'AUD')
+            ]
+            for cand, expected_ccy in other_candidates:
+                ok, ccy = _valid(cand)
+                if ok and ccy == expected_ccy:
+                    logger.info(f"Resolved {base} to local listing {cand} ({ccy})")
+                    return cand
+
+            # If base exists and has non-USD currency, keep it
+            if base_ok and base_ccy and base_ccy != 'USD':
+                logger.info(f"Keeping {base} with currency {base_ccy}")
+                return base
+
+            # Otherwise keep original
+            return base
+        except Exception as e:
+            logger.warning(f"Failed to resolve exchange for {symbol}: {e}")
+            return symbol
 
 def main():
     """Main function to run the enhanced stock predictor"""
