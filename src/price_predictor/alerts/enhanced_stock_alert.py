@@ -23,6 +23,10 @@ from typing import Dict, List, Tuple, Optional
 import praw
 import re
 from dotenv import load_dotenv
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib import dates as mdates
 
 class EnhancedStockPredictor:
     def __init__(self, config_file: str = "configs/config.json"):
@@ -1201,7 +1205,43 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             print(alert_msg)
             
             # Send to Slack
-            self.send_slack_notification(alert_msg, "#stock-price-alerts")
+            ts = self.send_slack_notification(alert_msg, "#stock-price-alerts")
+            
+            # Generate and upload charts
+            try:
+                charts_dir = os.path.join('reports', 'charts')
+                os.makedirs(charts_dir, exist_ok=True)
+
+                # Intraday chart with prediction overlay
+                intraday_path = os.path.join(charts_dir, f"{self.ticker}_intraday.png")
+                self.generate_intraday_chart_with_prediction(
+                    predicted_price=self._safe_to_float(signal_data.get('predicted_price'), 0.0),
+                    output_path=intraday_path
+                )
+                self.upload_slack_file(intraday_path, title=f"{self.ticker} Intraday + Prediction", channel="#stock-price-alerts", thread_ts=ts)
+
+                # 5D trend (no prediction overlay)
+                five_day_path = os.path.join(charts_dir, f"{self.ticker}_5d.png")
+                self.generate_timeframe_chart(period="5d", interval="15m", output_path=five_day_path)
+                self.upload_slack_file(five_day_path, title=f"{self.ticker} 5D Trend", channel="#stock-price-alerts", thread_ts=ts)
+
+                # 1M trend (no prediction overlay)
+                one_month_path = os.path.join(charts_dir, f"{self.ticker}_1mo.png")
+                self.generate_timeframe_chart(period="1mo", interval="1d", output_path=one_month_path)
+                self.upload_slack_file(one_month_path, title=f"{self.ticker} 1M Trend", channel="#stock-price-alerts", thread_ts=ts)
+
+                # 1D trend (1m or 5m depending on intraday interval)
+                one_day_path = os.path.join(charts_dir, f"{self.ticker}_1d.png")
+                self.generate_timeframe_chart(period="1d", interval=self.config.get('intraday_interval', '5m'), output_path=one_day_path)
+                self.upload_slack_file(one_day_path, title=f"{self.ticker} 1D Trend", channel="#stock-price-alerts", thread_ts=ts)
+
+                # 1W trend (if supported by interval)
+                one_week_path = os.path.join(charts_dir, f"{self.ticker}_1w.png")
+                self.generate_timeframe_chart(period="5d", interval="30m", output_path=one_week_path)
+                self.upload_slack_file(one_week_path, title=f"{self.ticker} 1W Trend", channel="#stock-price-alerts", thread_ts=ts)
+
+            except Exception as e:
+                logger.warning(f"Failed to generate/upload charts: {str(e)}")
             
         except Exception as e:
             logger.error(f"Error sending alert: {str(e)}")
@@ -1341,8 +1381,8 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             logger.error(f"Error getting sentiment analysis: {str(e)}")
             return "Unable to generate sentiment analysis"
     
-    def send_slack_notification(self, message: str, channel: str = "#stock-price-alerts") -> None:
-        """Send notification to Slack using the provided logic"""
+    def send_slack_notification(self, message: str, channel: str = "#stock-price-alerts") -> Optional[str]:
+        """Send notification to Slack. Returns message ts if using bot token, else None."""
         try:
             if self.slack_bot_token:
                 # Use Slack API with bot token to specify channel
@@ -1357,20 +1397,25 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 result = response.json()
                 if not result["ok"]:
                     logger.error(f"Failed to send Slack message: {result.get('error', 'Unknown error')}")
+                    return None
                 else:
                     logger.info(f"Successfully sent Slack notification to {channel}")
+                    return result.get("ts")
             elif self.slack_webhook_url:
                 # Fallback to webhook if bot token not available
                 response = requests.post(self.slack_webhook_url, json={"text": message})
                 if response.status_code == 200:
                     logger.info(f"Successfully sent Slack webhook notification")
+                    return None
                 else:
                     logger.error(f"Failed to send Slack webhook: {response.status_code}")
+                    return None
             else:
                 logger.warning("No Slack credentials configured")
-                
+                return None
         except Exception as e:
             logger.error(f"Error sending Slack notification: {str(e)}")
+            return None
     
     def run_daily_analysis(self) -> None:
         """Run the daily analysis and generate alerts"""
@@ -2228,6 +2273,121 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         except Exception as e:
             logger.warning(f"Failed to resolve exchange for {symbol}: {e}")
             return symbol
+
+    def _plot_candlesticks(self, ax, df: pd.DataFrame, time_col: str) -> None:
+        """Render simple candlesticks on the provided axes using matplotlib."""
+        if df is None or df.empty:
+            return
+        x = mdates.date2num(pd.to_datetime(df[time_col]).to_pydatetime())
+        width = 0.6 * (x[1] - x[0]) if len(x) > 1 else 0.02
+        for i in range(len(df)):
+            o = float(df['Open'].iloc[i])
+            h = float(df['High'].iloc[i])
+            l = float(df['Low'].iloc[i])
+            c = float(df['Close'].iloc[i])
+            color = '#2ca02c' if c >= o else '#d62728'
+            # Wick
+            ax.vlines(x[i], l, h, color=color, linewidth=1)
+            # Body
+            lower = min(o, c)
+            height = abs(c - o)
+            if height == 0:
+                height = max(1e-6, 0.0001 * (h if h else 1))
+            rect = plt.Rectangle((x[i] - width/2, lower), width, height, color=color, alpha=0.7)
+            ax.add_patch(rect)
+        ax.xaxis_date()
+        ax.grid(True, linestyle='--', alpha=0.2)
+        ax.set_ylabel('Price')
+
+    def generate_intraday_chart_with_prediction(self, predicted_price: float, output_path: str) -> None:
+        """Generate intraday candlestick chart and overlay predicted path until 16:00 local time."""
+        try:
+            interval = self.config.get('intraday_interval', '5m')
+            days = int(self.config.get('intraday_days', 1))
+            df = self.get_intraday_data(interval=interval, days=days)
+            if df is None or df.empty:
+                raise ValueError("No intraday data available")
+            fig, ax = plt.subplots(figsize=(10, 5))
+            self._plot_candlesticks(ax, df, time_col='Datetime')
+
+            # Overlay predicted path from last candle close to market close
+            try:
+                last_time = pd.to_datetime(df['Datetime'].iloc[-1])
+                last_price = float(df['Close'].iloc[-1])
+                market_close = last_time.replace(hour=16, minute=0, second=0, microsecond=0)
+                if market_close <= last_time:
+                    market_close = market_close + timedelta(days=1)
+                # Build timeline in same spacing as recent candles
+                if predicted_price and predicted_price > 0:
+                    # Create 5-minute steps
+                    times = []
+                    t = last_time
+                    while t < market_close:
+                        t += timedelta(minutes=5)
+                        times.append(t)
+                    if times:
+                        xs = mdates.date2num(times)
+                        # Linear path
+                        ys = [last_price + (predicted_price - last_price) * (i+1)/len(times) for i in range(len(times))]
+                        ax.plot_date(xs, ys, '-o', linewidth=2, markersize=2, color='#1f77b4', label='Predicted path')
+                        ax.legend(loc='upper left')
+            except Exception as e:
+                logger.warning(f"Failed to overlay prediction path: {e}")
+
+            ax.set_title(f"{self.ticker} Intraday ({interval}) with Prediction")
+            fig.autofmt_xdate()
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=150)
+            plt.close(fig)
+        except Exception as e:
+            logger.warning(f"Failed generating intraday chart: {e}")
+
+    def generate_timeframe_chart(self, period: str, interval: str, output_path: str) -> None:
+        """Generate a candlestick chart for a given period/interval without prediction overlay."""
+        try:
+            data = yf.download(self.ticker, period=period, interval=interval, progress=False, auto_adjust=True)
+            if data is None or data.empty:
+                raise ValueError("No data for timeframe chart")
+            data = data.dropna().reset_index()
+            # Normalize column names
+            if 'Datetime' not in data.columns:
+                if 'Date' in data.columns:
+                    data = data.rename(columns={'Date': 'Datetime'})
+                else:
+                    data['Datetime'] = data.index
+            fig, ax = plt.subplots(figsize=(10, 5))
+            self._plot_candlesticks(ax, data[['Datetime','Open','High','Low','Close']], time_col='Datetime')
+            ax.set_title(f"{self.ticker} {period} ({interval}) Trend")
+            fig.autofmt_xdate()
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=150)
+            plt.close(fig)
+        except Exception as e:
+            logger.warning(f"Failed generating timeframe chart {period}/{interval}: {e}")
+
+    def upload_slack_file(self, file_path: str, title: str, channel: str = "#stock-price-alerts", thread_ts: Optional[str] = None) -> None:
+        """Upload an image file to Slack channel using bot token. Optionally thread under a message ts."""
+        try:
+            if not self.slack_bot_token:
+                logger.warning("No Slack bot token configured; skipping file upload")
+                return
+            if not os.path.exists(file_path):
+                logger.warning(f"File not found for Slack upload: {file_path}")
+                return
+            with open(file_path, 'rb') as f:
+                response = requests.post(
+                    "https://slack.com/api/files.upload",
+                    headers={"Authorization": f"Bearer {self.slack_bot_token}"},
+                    data={"channels": channel, "title": title, **({"thread_ts": thread_ts} if thread_ts else {})},
+                    files={"file": (os.path.basename(file_path), f, "image/png")}
+                )
+            result = response.json()
+            if not result.get("ok"):
+                logger.error(f"Slack file upload failed: {result.get('error', 'unknown error')}")
+            else:
+                logger.info(f"Uploaded chart to Slack: {os.path.basename(file_path)}")
+        except Exception as e:
+            logger.warning(f"Failed to upload file to Slack: {e}")
 
 def main():
     """Main function to run the enhanced stock predictor"""
