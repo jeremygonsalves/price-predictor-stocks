@@ -3,19 +3,19 @@
     "lookback_days": 10,
     "prediction_hours": 4,
     "alert_time": "12:00",
-    "buy_threshold": 0.5,
-    "sell_threshold": -0.5,
+    "buy_threshold": 5, 
+    "sell_threshold": -5, 
     "confidence_threshold": 0.7,
-    "training_epochs": 100,
-    "batch_size": 32,
-    "learning_rate": 0.001,
-    "enable_sentiment_analysis": true,
+    "training_epochs": 50, 
+    "batch_size": 32, 
+    "learning_rate": 0.001, 
+    "enable_sentiment_analysis": true, 
     "enable_technical_indicators": true,
     "log_level": "INFO",
     "save_alerts_to_file": true,
     "alert_file": "trading_alerts.txt",
     "log_file": "stock_alerts.log",
-    "min_required_days": 20,
+    "min_required_days": 10,
     "min_training_samples": 30,
     "min_prediction_days": 5,
     "min_fallback_days": 2,
@@ -32,9 +32,9 @@
     "intraday_interval": "5m",
     "intraday_days": 5,
     "ensemble_weights": {
-        "technical_analysis": 0.4,
-        "sentiment_based": 0.25,
-        "microstructure": 0.2,
+        "technical_analysis": 0.5,
+        "sentiment_based": 0.2,
+        "microstructure": 0.15,
         "mean_reversion": 0.15
     },
     "real_time_sentiment": {
@@ -43,7 +43,7 @@
         "enable_earnings_impact": true,
         "enable_analyst_impact": true,
         "enable_options_flow": true,
-        "sentiment_hours": 4
+        "sentiment_hours": 24
     },
     "microstructure_features": {
         "enable_spread_analysis": true,
@@ -52,8 +52,8 @@
         "enable_time_based_adjustments": true
     },
     "prediction_bounds": {
-        "max_daily_change": 0.02,
-        "max_intraday_change": 0.015,
+        "max_daily_change": 0.2,
+        "max_intraday_change": 0.15,
         "confidence_dampening": 0.5
     }
 } 

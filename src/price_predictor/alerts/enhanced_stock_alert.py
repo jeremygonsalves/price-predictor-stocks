@@ -705,6 +705,57 @@ class EnhancedStockPredictor:
             logger.error(f"Error preparing data: {str(e)}")
             raise
     
+    def prepare_tabular_data(self, stock_data: pd.DataFrame, sentiment_data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+        """Prepare a tabular dataset for tree-based models (e.g., XGBoost)."""
+        import numpy as np
+        try:
+            # Ensure technical indicators exist
+            base_cols = [
+                'Open', 'High', 'Low', 'Close', 'Volume',
+                'MA_5', 'MA_10', 'MA_20', 'MA_50', 'MA_200',
+                'Price_vs_MA20', 'Price_vs_MA50', 'RSI', 'MACD', 'MACD_Signal', 'MACD_Histogram',
+                'BB_Position', 'Volume_Ratio', 'Price_Change', 'Price_Change_5', 'Volatility',
+                'Support_Resistance_Ratio'
+            ]
+            cols = [c for c in base_cols if c in stock_data.columns]
+            df = stock_data.copy().reset_index(drop=True)
+
+            # Sentiment aggregates (if available) aligned by date
+            if not sentiment_data.empty and self.config.get('enable_sentiment_analysis', True) and 'date' in sentiment_data.columns:
+                s = sentiment_data.copy()
+                s['date'] = pd.to_datetime(s['date']).dt.date
+                df['date'] = pd.to_datetime(df['Date']).dt.date
+                agg_cols = ['avg_polarity', 'std_polarity', 'avg_score', 'avg_upvote_ratio', 'total_volume']
+                agg_cols = [c for c in agg_cols if c in s.columns]
+                if agg_cols:
+                    s_agg = s[['date'] + agg_cols].groupby('date').mean().reset_index()
+                    df = df.merge(s_agg, on='date', how='left')
+                    cols += [c for c in agg_cols if c in df.columns]
+                df = df.drop(columns=['date'], errors='ignore')
+
+            # Drop rows with NA in selected columns
+            df = df.dropna(subset=cols)
+            if df.empty:
+                return np.empty((0, len(cols))), np.empty((0,))
+
+            X_list, y_list = [], []
+            for i in range(self.lookback_days, len(df)):
+                xrow = df.iloc[i][cols].values
+                target_idx = i + self.prediction_hours
+                if target_idx < len(df):
+                    yval = float(df.iloc[target_idx]['Close'])
+                else:
+                    yval = float(df.iloc[i]['Close'])
+                X_list.append(xrow)
+                y_list.append(yval)
+
+            X = np.array(X_list)
+            y = np.array(y_list)
+            return X, y
+        except Exception as e:
+            logger.error(f"Error preparing tabular data: {e}")
+            return np.empty((0, 0)), np.empty((0,))
+    
     def build_model(self, input_shape: Tuple[int, int]) -> tf.keras.Model:
         """Build an enhanced LSTM model with attention mechanism"""
         try:
@@ -818,8 +869,48 @@ class EnhancedStockPredictor:
             )
             
             # Evaluate model
-            test_loss, test_mae = self.model.evaluate(X_test, y_test, verbose=0)
-            logger.info(f"Model training completed. Test MAE: {test_mae:.4f}")
+            from sklearn.metrics import mean_absolute_error
+            lstm_pred = self.model.predict(X_test, verbose=0).ravel()
+            lstm_mae = float(mean_absolute_error(y_test, lstm_pred))
+            logger.info(f"LSTM Test MAE: {lstm_mae:.6f}")
+            # Save for reporting
+            self.lstm_mae = lstm_mae
+            
+            # XGBoost baseline comparison
+            try:
+                X_tab, y_tab = self.prepare_tabular_data(stock_data, sentiment_data)
+                if X_tab.size > 0 and y_tab.size > 0:
+                    split_idx = int(len(X_tab) * 0.8)
+                    Xb_train, Xb_test = X_tab[:split_idx], X_tab[split_idx:]
+                    yb_train, yb_test = y_tab[:split_idx], y_tab[split_idx:]
+                    
+                    import xgboost as xgb
+                    xgb_model = xgb.XGBRegressor(
+                        n_estimators=300,
+                        max_depth=6,
+                        learning_rate=0.05,
+                        subsample=0.9,
+                        colsample_bytree=0.9,
+                        random_state=42,
+                        n_jobs=-1,
+                    )
+                    xgb_model.fit(Xb_train, yb_train)
+                    xgb_pred = xgb_model.predict(Xb_test)
+                    xgb_mae = float(mean_absolute_error(yb_test, xgb_pred))
+                    logger.info(f"XGBoost Test MAE: {xgb_mae:.6f}")
+                    # Save for reporting
+                    self.xgb_mae = xgb_mae
+                    
+                    better = 'XGBoost' if xgb_mae < lstm_mae else 'LSTM'
+                    logger.info(f"Better performer on holdout: {better} ({min(lstm_mae, xgb_mae):.6f} MAE)")
+                    
+                    # Store for later optional use
+                    self.xgb_model = xgb_model
+                    self.xgb_features = Xb_train.shape[1]
+                else:
+                    logger.info("XGBoost baseline skipped (insufficient tabular data)")
+            except Exception as e:
+                logger.warning(f"XGBoost baseline failed: {e}")
             
             self.last_training_date = today
             
@@ -1132,7 +1223,7 @@ class EnhancedStockPredictor:
             
             return {
                 'signal': signal,
-                'reason': f'Based on current market data and sentiment analysis, the stock is predicted to {signal.lower()} by 4pm EST today',
+                'reason': f'Based on current market data and sentiment analysis, you should {signal.lower()} the stock because at 4 PM EST today it will be at {self.format_currency(predicted_price)}',
                 'current_price': current_price,
                 'predicted_price': predicted_price,
                 'price_change_pct': price_change_pct,
@@ -1148,7 +1239,7 @@ class EnhancedStockPredictor:
                 'current_price': 0,
                 'predicted_price': 0,
                 'confidence': 0.0
-            }
+            } #this is the return value for the signal if the signal is not buy or sell
     
     def send_alert(self, signal_data: Dict[str, any]) -> None:
         """Send detailed trading alert with comprehensive analysis"""
@@ -1169,12 +1260,19 @@ class EnhancedStockPredictor:
             
             emoji = signal_emoji.get(signal_data['signal'], '❓')
             
+            # Compute dynamic prediction target time from config
+            try:
+                horizon_hours = int(self.prediction_hours)
+            except Exception:
+                horizon_hours = int(self.config.get('prediction_hours', 4))
+            target_time = (current_time + timedelta(hours=horizon_hours)).strftime('%Y-%m-%d %H:%M')
+            
             alert_msg = f"""
 {emoji} STOCK ALERT: {self.ticker} {emoji}
 
 Alert Time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} EST
 Current Price: {self.format_currency(signal_data['current_price'])}
-Predicted Price (4PM EST): {self.format_currency(signal_data['predicted_price'])}
+Predicted Price (+{horizon_hours}h @ {target_time}): {self.format_currency(signal_data['predicted_price'])}
 Expected Change: {signal_data.get('price_change_pct', 0):.2f}%
 Signal: {signal_data['signal']}
 Confidence: {signal_data['confidence']:.1%}
@@ -1187,6 +1285,7 @@ SENTIMENT ANALYSIS:
 
 RECOMMENDATION:
 {signal_data['reason']}
++{('\n\nMODEL PERFORMANCE:\n' + (('• LSTM MAE: ' + format(self.lstm_mae, '.6f')) if hasattr(self, 'lstm_mae') else '') + (('\n• XGBoost MAE: ' + format(self.xgb_mae, '.6f')) if hasattr(self, 'xgb_mae') else '')) if (hasattr(self, 'lstm_mae') or hasattr(self, 'xgb_mae')) else ''}
 
 Model: Enhanced LSTM with Multi-Source Sentiment Analysis
 Data Sources: Yahoo Finance, Reddit, News APIs
