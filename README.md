@@ -1,6 +1,6 @@
 # Real-Time Stock Price Prediction System
 
-A sophisticated real-time stock prediction system that provides buy/sell recommendations at 12pm based on 4-hour price predictions. The system uses LSTM neural networks with sentiment analysis from Reddit and news sources to make accurate predictions.
+A sophisticated real-time stock prediction system that provides buy/sell recommendations at 12pm based on 4-hour price predictions. The system uses **config-driven ensemble methods** with LSTM neural networks and sentiment analysis from Reddit and news sources to make accurate predictions.
 
 ## Features
 
@@ -10,7 +10,10 @@ A sophisticated real-time stock prediction system that provides buy/sell recomme
 - **Sentiment Analysis**: Integrates Reddit and news sentiment data
 - **Technical Indicators**: Uses comprehensive technical analysis
 - **LSTM Neural Networks**: Advanced deep learning for price prediction
-- **Configurable**: Easy to customize via JSON configuration
+- **Config-Driven Architecture**: All weights and metrics inherited from config.json
+- **Enhanced Price Fetching**: Multiple fallback methods for reliable price data
+- **Currency Handling**: Automatic currency detection and formatting
+- **Robust Error Handling**: Graceful handling of rate limiting and failures
 - **Logging**: Comprehensive logging and alert history
 
 ## Quick Start
@@ -28,7 +31,7 @@ python setup.py
 
 ### 2. Configuration
 
-Edit `config.json` to customize your settings (core settings):
+Edit `config.json` to customize your settings. The system now uses **config inheritance** - all weights and metrics are controlled from this file:
 
 ```json
 {
@@ -51,7 +54,7 @@ Edit `config.json` to customize your settings (core settings):
 }
 ```
 
-Advanced settings (optional):
+Advanced settings with **config-driven ensemble weights**:
 
 ```json
 {
@@ -72,9 +75,9 @@ Advanced settings (optional):
   "intraday_interval": "5m",
   "intraday_days": 5,
   "ensemble_weights": {
-    "technical_analysis": 0.4,
-    "sentiment_based": 0.25,
-    "microstructure": 0.2,
+    "technical_analysis": 0.5,
+    "sentiment_based": 0.2,
+    "microstructure": 0.15,
     "mean_reversion": 0.15
   },
   "real_time_sentiment": {
@@ -83,7 +86,7 @@ Advanced settings (optional):
     "enable_earnings_impact": true,
     "enable_analyst_impact": true,
     "enable_options_flow": true,
-    "sentiment_hours": 4
+    "sentiment_hours": 24
   },
   "microstructure_features": {
     "enable_spread_analysis": true,
@@ -92,42 +95,71 @@ Advanced settings (optional):
     "enable_time_based_adjustments": true
   },
   "prediction_bounds": {
-    "max_daily_change": 0.02,
-    "max_intraday_change": 0.015,
+    "max_daily_change": 0.2,
+    "max_intraday_change": 0.15,
     "confidence_dampening": 0.5
   }
 }
 ```
 
-### 3. Optional: Reddit API Setup
+### 3. Authentication Setup
 
-For enhanced sentiment analysis, set up Reddit API credentials:
+#### **Reddit API Setup (Required for Sentiment Analysis)**
+
+For enhanced sentiment analysis, you **must** set up your own Reddit API credentials:
 
 1. Go to https://www.reddit.com/prefs/apps
-2. Create a new app
-3. Edit the credential files with your credentials:
+2. Create a new app (select "script" type)
+3. Create the following files in the `secrets/` directory:
 
 ```bash
-# Edit client_id.txt
-echo "YOUR_CLIENT_ID" > client_id.txt
+# Create secrets directory
+mkdir -p secrets
 
-# Edit client_secret.txt  
-echo "YOUR_CLIENT_SECRET" > client_secret.txt
+# Create username file (your Reddit username)
+echo "YOUR_REDDIT_USERNAME" > secrets/username.txt
 
-# Edit pw.txt
-echo "YOUR_REDDIT_PASSWORD" > pw.txt
+# Create password file (your Reddit password)
+echo "YOUR_REDDIT_PASSWORD" > secrets/pw.txt
+
+# Create client ID file (from your Reddit app)
+echo "YOUR_CLIENT_ID" > secrets/client_id.txt
+
+# Create client secret file (from your Reddit app)
+echo "YOUR_CLIENT_SECRET" > secrets/client_secret.txt
 ```
 
-**Note**: The system uses username `InterestingRun2732` by default (as in the original notebook).
+**Important**: 
+- You must use your own Reddit credentials - the system will not work with default credentials
+- Keep your credentials secure and never commit them to version control
+- The `secrets/` directory is already in `.gitignore` for security
+
+#### **Slack API Setup (Optional for Notifications)**
+
+For Slack notifications, set up one of the following:
+
+**Option 1: Webhook URL (Simpler)**
+```bash
+# Add to your ~/.env file
+echo "SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL" >> ~/.env
+```
+
+**Option 2: Bot Token (More Features)**
+```bash
+# Add to your ~/.env file
+echo "SLACK_BOT_TOKEN=xoxb-YOUR-BOT-TOKEN" >> ~/.env
+```
+
+**Note**: If no Slack credentials are provided, the system will still work but won't send Slack notifications.
 
 ### 4. Run the System
 
 ```bash
 # Run the enhanced version (recommended)
-python src/enhanced_stock_alert.py
+python src/price_predictor/alerts/enhanced_stock_alert.py
 
 # Or run the basic version
-python src/real_time_stock_alert.py
+python src/price_predictor/alerts/real_time_stock_alert.py
 ```
 
 ## How It Works
@@ -136,23 +168,27 @@ python src/real_time_stock_alert.py
 - **Historical Data**: Fetches daily stock data using Yahoo Finance API
 - **Technical Indicators**: Calculates 20+ technical indicators (RSI, MACD, Bollinger Bands, etc.)
 - **Sentiment Data**: Collects sentiment from Reddit and news sources
+- **Enhanced Price Fetching**: Multiple fallback methods for reliable price data
+- **Currency Detection**: Automatic currency detection and formatting
 
 ### 2. Model Training
 - **LSTM Neural Network**: Uses Long Short-Term Memory networks for time series prediction
 - **Feature Engineering**: Combines price data, technical indicators, and sentiment
 - **Sequence Learning**: Learns patterns from historical data sequences
+- **Config-Driven Weights**: All ensemble weights inherited from config.json
 
 ### 3. Prediction Process
-- **Real-time Data**: Gets current stock price
-- **4-Hour Forecast**: Predicts price 4 hours ahead
+- **Real-time Data**: Gets current stock price with enhanced methods
+- **4-Hour Forecast**: Predicts price 4 hours ahead using config-driven ensemble
 - **Signal Generation**: Compares current vs predicted price
-- **Alert System**: Sends buy/sell recommendations
+- **Alert System**: Sends buy/sell recommendations with currency formatting
 
 ### 4. Alert System
 - **Daily Schedule**: Runs analysis at 12pm daily
 - **Signal Types**: BUY, SELL, or HOLD recommendations
 - **Confidence Scoring**: Provides confidence levels for predictions
 - **Logging**: Saves all alerts to file
+- **Currency Display**: Clear currency indicators in all outputs
 
 ## Configuration Options
 
@@ -187,16 +223,16 @@ python src/real_time_stock_alert.py
 ### Intraday Settings
 - `intraday_interval` (e.g., "5m"), `intraday_days`
 
-### Ensemble Weights
+### Config-Driven Ensemble Weights
 - `ensemble_weights.technical_analysis`, `sentiment_based`, `microstructure`, `mean_reversion`
 
-### Real-Time Sentiment Toggles
+### Config-Driven Real-Time Sentiment Toggles
 - `real_time_sentiment.enable_news_sentiment`, `enable_social_sentiment`, `enable_earnings_impact`, `enable_analyst_impact`, `enable_options_flow`, `sentiment_hours`
 
-### Microstructure Features Toggles
+### Config-Driven Microstructure Features Toggles
 - `microstructure_features.enable_spread_analysis`, `enable_volume_analysis`, `enable_market_efficiency`, `enable_time_based_adjustments`
 
-### Prediction Bounds
+### Config-Driven Prediction Bounds
 - `prediction_bounds.max_daily_change`, `max_intraday_change`, `confidence_dampening`
 
 ## Technical Indicators Used
@@ -226,19 +262,19 @@ python src/real_time_stock_alert.py
 
 ## Output Examples
 
-### Alert Message
+### Alert Message with Currency Formatting
 ```
 🟢 STOCK ALERT: NVDA 🟢
 
 📊 Signal: BUY
-💰 Current Price: $145.67
-🎯 Predicted Price: $148.92
+💰 Current Price: $145.67 USD
+🎯 Predicted Price: $148.92 USD
 📈 Change: +2.23%
 🎯 Confidence: 89.2%
 📝 Reason: Predicted +2.23% change in 4 hours
 
 ⏰ Time: 2024-01-15 12:00:00
-🔧 Model: Enhanced LSTM with Sentiment Analysis
+🔧 Model: Enhanced LSTM with Config-Driven Ensemble
 ```
 
 ### Log File
@@ -265,7 +301,7 @@ The system now includes a comprehensive morning stock analysis feature that runs
 
 ```bash
 # Run morning analysis once
-python src/morning_stock_analysis.py --run-once
+python src/price_predictor/analysis/morning_stock_analysis.py --run-once
 
 # Schedule daily analysis at 8:30 AM (runner-based cron)
 /Users/jeremygonsalves/python_runner.sh morning_analysis schedule
@@ -289,7 +325,7 @@ python src/morning_stock_analysis.py --run-once
 🔥 TOP STOCKS TO WATCH TODAY 🔥
 
 1. NVDA (Score: 8.45)
-   💰 Price: $145.67 (📈 +2.34%)
+   💰 Price: $145.67 USD (📈 +2.34%)
    🏢 Sector: Technology
    📰 News Count: 15
    😊 Sentiment: 0.67
@@ -306,25 +342,84 @@ The morning analysis uses the same configuration file (`config.json`) and enviro
 - `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`: For Reddit sentiment analysis
 - `SLACK_WEBHOOK_URL`: For Slack notifications
 
+## Recent Enhancements (Latest Updates)
+
+### Config Inheritance Implementation
+- ✅ **All weights and metrics now inherited from config.json**
+- ✅ **No more hardcoded values in the codebase**
+- ✅ **Centralized configuration management**
+- ✅ **Easy tuning without code changes**
+
+### Enhanced Price Fetching
+- ✅ **Multiple fallback methods for reliable price data**
+- ✅ **Improved currency detection and formatting**
+- ✅ **Better error handling for rate limiting**
+- ✅ **Clear currency indicators in output**
+
+### Robust Error Handling
+- ✅ **Graceful handling of Yahoo Finance rate limiting**
+- ✅ **Better logging and error messages**
+- ✅ **No crashes on temporary failures**
+- ✅ **Comprehensive fallback mechanisms**
+
+### Currency Handling Improvements
+- ✅ **Automatic currency detection from stock data**
+- ✅ **Clear currency formatting (e.g., "$375.50 USD")**
+- ✅ **Support for multiple currencies (USD, CAD, EUR, etc.)**
+- ✅ **Proper currency symbols and codes**
+
+### Authentication Security Improvements
+- ✅ **Requires user's own Reddit credentials - no default credentials**
+- ✅ **Removed hardcoded username for security**
+- ✅ **Clear error messages when credentials are missing**
+- ✅ **Optional Slack integration with proper credential validation**
+- ✅ **Secure credential storage in secrets/ directory**
+
 ## File Structure
 
 ```
 price-predictor-stocks/
 ├── src/
-│   ├── real_time_stock_alert.py      # Basic version
-│   ├── enhanced_stock_alert.py       # Enhanced version (recommended)
-│   ├── morning_stock_analysis.py     # Morning stock analysis
-│   └── stock-price.ipynb             # Original notebook
-├── config.json                       # Configuration file
-├── requirements.txt                  # Python dependencies
-├── setup.py                         # Setup script
-├── test_morning_analysis.py         # Test script for morning analysis
-├── reddit_credentials.json          # Reddit API credentials (optional)
-├── trading_alerts.txt               # Alert history
-├── stock_alerts.log                 # System logs
-├── morning_stock_analysis.txt       # Morning analysis reports
-└── README.md                        # This file
+│   └── price_predictor/
+│       ├── alerts/
+│       │   ├── enhanced_stock_alert.py       # Enhanced version (recommended)
+│       │   └── real_time_stock_alert.py      # Basic version
+│       └── analysis/
+│           └── morning_stock_analysis.py     # Morning stock analysis
+├── configs/
+│   └── config.json                          # Configuration file
+├── secrets/                                 # Authentication credentials (create this)
+│   ├── username.txt                         # Your Reddit username
+│   ├── pw.txt                              # Your Reddit password
+│   ├── client_id.txt                       # Your Reddit app client ID
+│   ├── client_secret.txt                   # Your Reddit app client secret
+│   └── alphavantage.txt                    # Your Alpha Vantage API key
+├── logs/                                   # Log files and alerts
+│   ├── stock_alerts.log                    # System logs
+│   ├── trading_alerts.txt                  # Alert history
+│   ├── morning_stock_analysis.log          # Morning analysis logs
+│   └── cron.log                           # Cron job logs
+├── data/                                   # Data files
+│   └── NVDA.csv                           # Sample stock data
+├── reports/                                # Generated reports
+│   ├── charts/                            # Generated charts
+│   └── morning_stock_analysis.txt         # Morning analysis reports
+├── tests/                                  # Test files
+│   ├── test_config_inheritance.py         # Config inheritance tests
+│   ├── test_morning_analysis.py           # Morning analysis tests
+│   ├── test_authentication.py             # Authentication tests
+│   └── test_system.py                     # System tests
+├── docs/                                   # Documentation
+│   ├── LSTM-model.md                      # Technical documentation
+│   └── summaries/                         # Implementation summaries
+│       └── AUTHENTICATION_CHANGES_SUMMARY.md
+├── notebooks/                              # Jupyter notebooks
+├── requirements.txt                        # Python dependencies
+├── setup.py                               # Setup script
+└── README.md                              # This file
 ```
+
+**Note**: The `secrets/` directory is not included in the repository for security reasons. You must create it and add your own credentials.
 
 ## Dependencies
 
@@ -338,14 +433,37 @@ price-predictor-stocks/
 - **praw**: Reddit API client
 - **requests**: HTTP requests
 
+## Testing
+
+The system includes comprehensive testing for the new config inheritance features:
+
+```bash
+# Test config inheritance
+python test_config_inheritance.py
+
+# Test morning analysis
+python tests/test_morning_analysis.py
+```
+
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Import Errors**: Run `python setup.py` to install dependencies
-2. **Reddit API Errors**: Check your credentials in `reddit_credentials.json`
-3. **No Data**: Verify the stock ticker symbol is correct
-4. **Model Training Issues**: Increase `lookback_days` or `training_epochs`
+2. **Reddit API Errors**: 
+   - Check your credentials in the `secrets/` directory
+   - Ensure all 4 required files exist: `username.txt`, `pw.txt`, `client_id.txt`, `client_secret.txt`
+   - Verify your Reddit app is set to "script" type
+   - Check that your Reddit username and password are correct
+3. **Slack API Errors**: 
+   - Check your environment variables in `~/.env`
+   - Verify your webhook URL or bot token is correct
+   - Ensure your Slack app has the necessary permissions
+4. **No Data**: Verify the stock ticker symbol is correct
+5. **Model Training Issues**: Increase `lookback_days` or `training_epochs`
+6. **Rate Limiting**: The system now handles Yahoo Finance rate limiting gracefully
+7. **Currency Issues**: Currency detection is now automatic and robust
+8. **Authentication Required**: The system now requires your own Reddit credentials - it won't work with default credentials
 
 ### Performance Tips
 
@@ -353,6 +471,7 @@ price-predictor-stocks/
 - Adjust `batch_size` based on your system's memory
 - Reduce `training_epochs` for quicker testing
 - Disable sentiment analysis if not needed
+- Adjust ensemble weights in config.json for optimal performance
 
 ## Disclaimer
 

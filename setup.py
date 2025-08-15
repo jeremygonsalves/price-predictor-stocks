@@ -41,7 +41,7 @@ def create_reddit_credentials():
     
     print("   Please edit these files with your Reddit API credentials")
     print("   Get credentials from: https://www.reddit.com/prefs/apps")
-    print("   Note: The system uses username 'InterestingRun2732' by default")
+    print("   Note: You must provide your own Reddit credentials in the secrets/ directory")
 
 def create_directories():
     """Create necessary directories"""

@@ -103,20 +103,14 @@ class MorningStockAnalyzer:
             raise
     
     def load_alpha_vantage_key(self) -> Optional[str]:
-        """Load Alpha Vantage API key using the same logic as enhanced_stock_alert.py"""
+        """Load Alpha Vantage API key"""
         try:
-            # Check for Alpha Vantage key in new secrets directory or legacy paths
-            candidate_paths = [
-                'secrets/alphavantage.txt',
-                'src/alphavantage.txt',
-                'alphavantage.txt'
-            ]
-            for path in candidate_paths:
-                if os.path.exists(path):
-                    with open(path, 'r') as f:
-                        api_key = f.read().strip()
-                    logger.info(f"Alpha Vantage API key loaded from {path}")
-                    return api_key
+            # Check for Alpha Vantage key in secrets directory
+            if os.path.exists('secrets/alphavantage.txt'):
+                with open('secrets/alphavantage.txt', 'r') as f:
+                    api_key = f.read().strip()
+                logger.info("Alpha Vantage API key loaded from secrets/alphavantage.txt")
+                return api_key
             
             # Fallback to environment variable
             api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
@@ -131,53 +125,75 @@ class MorningStockAnalyzer:
             return None
     
     def init_reddit_client(self) -> Optional[dict]:
-        """Initialize Reddit client using the logic from the enhanced_stock_alert.py"""
+        """Initialize Reddit client - requires user's own credentials"""
         try:
-            # Check for Reddit credentials in new secrets directory or legacy paths
-            pw_paths = ['secrets/pw.txt', 'src/pw.txt', 'pw.txt']
-            client_id_paths = ['secrets/client_id.txt', 'src/client_id.txt', 'client_id.txt']
-            client_secret_paths = ['secrets/client_secret.txt', 'src/client_secret.txt', 'client_secret.txt']
+            # Check for Reddit credentials in secrets directory
+            required_files = ['secrets/pw.txt', 'secrets/client_id.txt', 'secrets/client_secret.txt', 'secrets/username.txt']
+            missing_files = []
             
-            pw_path = next((p for p in pw_paths if os.path.exists(p)), None)
-            cid_path = next((p for p in client_id_paths if os.path.exists(p)), None)
-            csec_path = next((p for p in client_secret_paths if os.path.exists(p)), None)
+            for file_path in required_files:
+                if not os.path.exists(file_path):
+                    missing_files.append(file_path)
             
-            if pw_path and cid_path and csec_path:
-                with open(pw_path, 'r') as f:
-                    pw = f.read().strip()
-                with open(cid_path, 'r') as f:
-                    client_id = f.read().strip()
-                with open(csec_path, 'r') as f:
-                    client_secret = f.read().strip()
-                
-                auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
-                data = {
-                    "grant_type": "password",
-                    "username": "InterestingRun2732",
-                    "password": pw
-                }
-                headers = {"User-Agent": "MyAPI/0.0.1"}
-                
-                res = requests.post("https://www.reddit.com/api/v1/access_token", 
-                                  auth=auth, data=data, headers=headers)
-                
-                if res.status_code == 200:
-                    token = res.json()['access_token']
-                    headers = {**headers, **{'Authorization': f"bearer {token}"}}
-                    logger.info("Reddit API client initialized successfully using credentials")
-                    return {
-                        'headers': headers,
-                        'token': token,
-                        'auth_method': 'oauth'
-                    }
-                else:
-                    logger.warning(f"Failed to get Reddit token: {res.status_code}")
-                    return None
-            else:
-                logger.info("Reddit credential files not found, sentiment analysis will use dummy data")
+            if missing_files:
+                logger.warning(f"Reddit credentials not found. Missing files: {', '.join(missing_files)}")
+                logger.info("To enable Reddit sentiment analysis, please create the following files in the 'secrets/' directory:")
+                logger.info("  - secrets/username.txt (your Reddit username)")
+                logger.info("  - secrets/pw.txt (your Reddit password)")
+                logger.info("  - secrets/client_id.txt (your Reddit app client ID)")
+                logger.info("  - secrets/client_secret.txt (your Reddit app client secret)")
+                logger.info("See README.md for setup instructions.")
                 return None
+            
+            # Read all required credentials
+            with open('secrets/username.txt', 'r') as f:
+                username = f.read().strip()
+            
+            with open('secrets/pw.txt', 'r') as f:
+                pw = f.read().strip()
+            
+            with open('secrets/client_id.txt', 'r') as f:
+                client_id = f.read().strip()
+            
+            with open('secrets/client_secret.txt', 'r') as f:
+                client_secret = f.read().strip()
+            
+            # Validate that credentials are not empty
+            if not all([username, pw, client_id, client_secret]):
+                logger.error("Reddit credentials found but some are empty. Please check your secrets files.")
+                return None
+            
+            # Use the authentication logic with user's own credentials
+            auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+            data = {
+                "grant_type": "password",
+                "username": username,
+                "password": pw
+            }
+            headers = {"User-Agent": "StockPredictor/1.0"}
+            
+            res = requests.post("https://www.reddit.com/api/v1/access_token", 
+                              auth=auth, data=data, headers=headers)
+            
+            if res.status_code == 200:
+                token = res.json()['access_token']
+                headers = {**headers, **{'Authorization': f"bearer {token}"}}
+                
+                logger.info(f"Reddit API client initialized successfully for user: {username}")
+                return {
+                    'headers': headers,
+                    'token': token,
+                    'auth_method': 'oauth',
+                    'username': username
+                }
+            else:
+                logger.error(f"Failed to authenticate with Reddit API: {res.status_code}")
+                logger.error("Please check your Reddit credentials in the secrets/ directory.")
+                return None
+                
         except Exception as e:
-            logger.warning(f"Failed to initialize Reddit client: {str(e)}")
+            logger.error(f"Failed to initialize Reddit client: {str(e)}")
+            logger.info("Reddit sentiment analysis will be disabled. Check your credentials and try again.")
             return None
     
     def get_analysis_time_range(self) -> Tuple[datetime, datetime]:

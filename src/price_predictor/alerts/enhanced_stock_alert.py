@@ -47,8 +47,24 @@ class EnhancedStockPredictor:
         
         # Initialize components
         self.ticker = self.config['ticker'].upper()
+        
+        # Validate ticker before resolving (but don't fail if rate limited)
+        try:
+            if not self.validate_ticker(self.ticker):
+                logger.warning(f"Ticker {self.ticker} may not be valid or accessible (could be rate limiting)")
+        except Exception as e:
+            logger.warning(f"Could not validate ticker {self.ticker}: {str(e)}")
+        
         # Resolve to proper exchange-specific symbol when base symbol is ambiguous
         self.ticker = self.resolve_exchange_symbol(self.ticker)
+        
+        # Validate resolved ticker (but don't fail if rate limited)
+        try:
+            if not self.validate_ticker(self.ticker):
+                logger.warning(f"Resolved ticker {self.ticker} may not be valid or accessible. Please check the ticker symbol.")
+        except Exception as e:
+            logger.warning(f"Could not validate resolved ticker {self.ticker}: {str(e)}")
+        
         self.lookback_days = self.config['lookback_days']
         self.prediction_hours = self.config['prediction_hours']
         
@@ -67,6 +83,18 @@ class EnhancedStockPredictor:
         load_dotenv(os.path.expanduser("~/.env"))
         self.slack_webhook_url = os.getenv('SLACK_WEBHOOK_URL')
         self.slack_bot_token = os.getenv('SLACK_BOT_TOKEN')
+        
+        # Check if Slack credentials are configured
+        if not self.slack_webhook_url and not self.slack_bot_token:
+            logger.warning("No Slack credentials found. Slack notifications will be disabled.")
+            logger.info("To enable Slack notifications, set one of the following environment variables:")
+            logger.info("  - SLACK_WEBHOOK_URL (for webhook notifications)")
+            logger.info("  - SLACK_BOT_TOKEN (for bot token notifications)")
+            logger.info("See README.md for setup instructions.")
+        elif self.slack_bot_token:
+            logger.info("Slack bot token found - will use bot API for notifications")
+        elif self.slack_webhook_url:
+            logger.info("Slack webhook URL found - will use webhook for notifications")
         
         # Initialize currency settings for proper display/conversion
         self.init_currency_settings()
@@ -99,7 +127,7 @@ class EnhancedStockPredictor:
             level=log_level,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('stock_alerts.log'),
+                logging.FileHandler('logs/stock_alerts.log'),
                 logging.StreamHandler()
             ]
         )
@@ -131,52 +159,75 @@ class EnhancedStockPredictor:
             logger.warning(f"Failed to update logging from config: {str(e)}")
     
     def init_reddit_client(self) -> Optional[dict]:
-        """Initialize Reddit client using the logic from the notebook"""
+        """Initialize Reddit client - requires user's own credentials"""
         try:
-            # Check for Reddit credentials in new secrets directory
-            if (os.path.exists('secrets/pw.txt') and 
-                os.path.exists('secrets/client_id.txt') and 
-                os.path.exists('secrets/client_secret.txt')):
-                
-                with open('secrets/pw.txt', 'r') as f:
-                    pw = f.read().strip()
-                
-                with open('secrets/client_id.txt', 'r') as f:
-                    client_id = f.read().strip()
-                
-                with open('secrets/client_secret.txt', 'r') as f:
-                    client_secret = f.read().strip()
-                
-                # Use the same authentication logic as the notebook
-                auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
-                data = {
-                    "grant_type": "password",
-                    "username": "InterestingRun2732",
-                    "password": pw
-                }
-                headers = {"User-Agent": "MyAPI/0.0.1"}
-                
-                res = requests.post("https://www.reddit.com/api/v1/access_token", 
-                                  auth=auth, data=data, headers=headers)
-                
-                if res.status_code == 200:
-                    token = res.json()['access_token']
-                    headers = {**headers, **{'Authorization': f"bearer {token}"}}
-                    
-                    logger.info("Reddit API client initialized successfully using secrets credentials")
-                    return {
-                        'headers': headers,
-                        'token': token,
-                        'auth_method': 'oauth'
-                    }
-                else:
-                    logger.warning(f"Failed to get Reddit token: {res.status_code}")
-                    return None
-            else:
-                logger.info("Reddit credential files not found in secrets/, sentiment analysis will use dummy data")
+            # Check for Reddit credentials in secrets directory
+            required_files = ['secrets/pw.txt', 'secrets/client_id.txt', 'secrets/client_secret.txt', 'secrets/username.txt']
+            missing_files = []
+            
+            for file_path in required_files:
+                if not os.path.exists(file_path):
+                    missing_files.append(file_path)
+            
+            if missing_files:
+                logger.warning(f"Reddit credentials not found. Missing files: {', '.join(missing_files)}")
+                logger.info("To enable Reddit sentiment analysis, please create the following files in the 'secrets/' directory:")
+                logger.info("  - secrets/username.txt (your Reddit username)")
+                logger.info("  - secrets/pw.txt (your Reddit password)")
+                logger.info("  - secrets/client_id.txt (your Reddit app client ID)")
+                logger.info("  - secrets/client_secret.txt (your Reddit app client secret)")
+                logger.info("See README.md for setup instructions.")
                 return None
+            
+            # Read all required credentials
+            with open('secrets/username.txt', 'r') as f:
+                username = f.read().strip()
+            
+            with open('secrets/pw.txt', 'r') as f:
+                pw = f.read().strip()
+            
+            with open('secrets/client_id.txt', 'r') as f:
+                client_id = f.read().strip()
+            
+            with open('secrets/client_secret.txt', 'r') as f:
+                client_secret = f.read().strip()
+            
+            # Validate that credentials are not empty
+            if not all([username, pw, client_id, client_secret]):
+                logger.error("Reddit credentials found but some are empty. Please check your secrets files.")
+                return None
+            
+            # Use the authentication logic with user's own credentials
+            auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+            data = {
+                "grant_type": "password",
+                "username": username,
+                "password": pw
+            }
+            headers = {"User-Agent": "StockPredictor/1.0"}
+            
+            res = requests.post("https://www.reddit.com/api/v1/access_token", 
+                              auth=auth, data=data, headers=headers)
+            
+            if res.status_code == 200:
+                token = res.json()['access_token']
+                headers = {**headers, **{'Authorization': f"bearer {token}"}}
+                
+                logger.info(f"Reddit API client initialized successfully for user: {username}")
+                return {
+                    'headers': headers,
+                    'token': token,
+                    'auth_method': 'oauth',
+                    'username': username
+                }
+            else:
+                logger.error(f"Failed to authenticate with Reddit API: {res.status_code}")
+                logger.error("Please check your Reddit credentials in the secrets/ directory.")
+                return None
+                
         except Exception as e:
-            logger.warning(f"Failed to initialize Reddit client: {str(e)}")
+            logger.error(f"Failed to initialize Reddit client: {str(e)}")
+            logger.info("Reddit sentiment analysis will be disabled. Check your credentials and try again.")
             return None
     
     # --------------------- Currency utilities ---------------------
@@ -189,20 +240,29 @@ class EnhancedStockPredictor:
                 info = stock.info or {}
             except Exception:
                 info = {}
+            
+            # Get currency from stock info, default to USD
             self.quote_currency = (info.get('currency') or 'USD').upper()
+            
             # Always display in the stock's native quote currency
             self.display_currency = self.quote_currency
             self.currency_symbol = self.get_currency_symbol(self.display_currency)
-            self._fx_rate = self.get_fx_rate(self.quote_currency, self.display_currency)
-            logger.info(f"Currency settings: quote={self.quote_currency}, display={self.display_currency}, fx_rate={self._fx_rate:.6f}")
+            
+            # For now, no conversion needed since we display in native currency
+            self._fx_rate = 1.0
+            
+            logger.info(f"Currency settings: quote={self.quote_currency}, display={self.display_currency}, symbol={self.currency_symbol}")
+            
         except Exception as e:
+            # Fallback to USD
             self.quote_currency = 'USD'
             self.display_currency = 'USD'
             self.currency_symbol = '$'
             self._fx_rate = 1.0
-            logger.warning(f"Failed to initialize currency settings: {str(e)}")
+            logger.warning(f"Failed to initialize currency settings: {str(e)}, using USD fallback")
     
     def get_currency_symbol(self, currency_code: str) -> str:
+        """Get currency symbol with better formatting for display"""
         mapping = {
             'USD': '$',
             'CAD': 'C$',
@@ -212,7 +272,10 @@ class EnhancedStockPredictor:
             'AUD': 'A$',
             'CHF': 'CHF',
             'HKD': 'HK$',
-            'INR': '₹'
+            'INR': '₹',
+            'CNY': '¥',
+            'SGD': 'S$',
+            'NZD': 'NZ$'
         }
         return mapping.get(currency_code.upper(), currency_code.upper() + ' ')
     
@@ -245,13 +308,24 @@ class EnhancedStockPredictor:
             return amount
     
     def format_currency(self, amount: float) -> str:
-        converted = self.apply_currency_conversion(amount)
-        # If we have a standard symbol (like $, C$), use it; otherwise append code at end
-        symbol = self.currency_symbol
-        if symbol.endswith(' '):
-            return f"{converted:.2f} {self.display_currency}"
-        else:
-            return f"{symbol}{converted:.2f}"
+        """Format currency with proper symbol and currency code for clarity"""
+        try:
+            converted = self.apply_currency_conversion(amount)
+            
+            # Format with currency symbol and code for clarity
+            symbol = self.currency_symbol
+            currency_code = self.display_currency
+            
+            if symbol.endswith(' '):
+                # For currencies without standard symbols, show both symbol and code
+                return f"{converted:.2f} {currency_code}"
+            else:
+                # For currencies with standard symbols, show symbol and code
+                return f"{symbol}{converted:.2f} {currency_code}"
+                
+        except Exception as e:
+            logger.warning(f"Error formatting currency: {str(e)}")
+            return f"{amount:.2f}"
     # ------------------- End currency utilities -------------------
     
     def get_reddit_sentiment(self, subreddits: List[str] = None, limit: int = 100) -> pd.DataFrame:
@@ -923,28 +997,55 @@ class EnhancedStockPredictor:
         try:
             if value is None:
                 return default
-            # Unbox common containers
+            
+            # Handle pandas DataFrame
             if isinstance(value, pd.DataFrame):
                 if 'Close' in value.columns and not value['Close'].empty:
                     value = value['Close'].iloc[-1]
+                elif 'Adj Close' in value.columns and not value['Adj Close'].empty:
+                    value = value['Adj Close'].iloc[-1]
                 else:
-                    numeric = value.select_dtypes(include=[np.number])
-                    value = numeric.stack().iloc[-1] if not numeric.empty else default
+                    # Try to find any numeric column
+                    numeric_cols = value.select_dtypes(include=[np.number])
+                    if not numeric_cols.empty:
+                        value = numeric_cols.iloc[-1, -1]  # Last value of last numeric column
+                    else:
+                        return default
+            
+            # Handle pandas Series
             if isinstance(value, pd.Series):
                 if not value.empty:
-                    value = value.iloc[-1]
+                    # Remove any NaN values and get the last valid value
+                    value = value.dropna()
+                    if not value.empty:
+                        value = value.iloc[-1]
+                    else:
+                        return default
                 else:
                     return default
+            
+            # Handle numpy arrays and lists
             if isinstance(value, (list, tuple, np.ndarray)):
                 arr = np.array(value).ravel()
                 if arr.size == 0:
                     return default
+                # Remove NaN values
+                arr = arr[~np.isnan(arr)]
+                if arr.size == 0:
+                    return default
                 value = arr[-1]
+            
+            # Convert to float
             result = float(value)
+            
+            # Validate the result
             if not np.isfinite(result) or result <= 0:
                 return default
+            
             return result
-        except Exception:
+            
+        except Exception as e:
+            logger.debug(f"Error converting to float: {str(e)}, value: {value}")
             return default
     
     def get_current_price(self) -> float:
@@ -953,7 +1054,21 @@ class EnhancedStockPredictor:
             logger.info(f"Fetching current price for {self.ticker}...")
             stock = yf.Ticker(self.ticker)
 
-            # Method 1: Use fast_info last price
+            # Method 1: Use stock.info for current market price (most reliable)
+            try:
+                info = stock.info or {}
+                # Try multiple price fields in order of preference
+                price_fields = ['regularMarketPrice', 'currentPrice', 'lastPrice', 'previousClose']
+                for field in price_fields:
+                    if field in info and info[field] is not None:
+                        price = self._safe_to_float(info[field])
+                        if price > 0:
+                            logger.info(f"Got current price from info ({field}): {self.format_currency(price)}")
+                            return price
+            except Exception as e:
+                logger.warning(f"Failed to get price from stock.info: {str(e)}")
+
+            # Method 2: Use fast_info if available
             try:
                 fast_info = getattr(stock, 'fast_info', {}) or {}
                 for key in ['last_price', 'lastPrice', 'regularMarketPrice']:
@@ -965,58 +1080,57 @@ class EnhancedStockPredictor:
             except Exception as e:
                 logger.warning(f"fast_info unavailable: {str(e)}")
 
-            # Method 2: High-resolution recent history (1m)
+            # Method 3: Recent daily data (most recent close)
             try:
-                hist = stock.history(period="1d", interval="1m", auto_adjust=True)
-                price = self._safe_to_float(hist['Close'] if 'Close' in hist else hist)
-                if price > 0:
-                    logger.info(f"Got current price from 1m history: {self.format_currency(price)}")
-                    return price
-            except Exception as e:
-                logger.warning(f"Failed to get 1m history: {str(e)}")
-
-            # Method 3: Recent daily download
-            try:
-                current_price_days = int(self.config.get('current_price_days', 5))
-                data = yf.download(self.ticker, period=f"{current_price_days}d", progress=False, auto_adjust=True)
-                price = self._safe_to_float(data['Close'] if 'Close' in data else data)
-                if price > 0:
-                    logger.info(f"Got current price from recent daily data: {self.format_currency(price)}")
-                    return price
+                data = yf.download(self.ticker, period="2d", progress=False, auto_adjust=True)
+                if not data.empty and 'Close' in data.columns:
+                    price = self._safe_to_float(data['Close'].iloc[-1])
+                    if price > 0:
+                        logger.info(f"Got current price from recent daily data: {self.format_currency(price)}")
+                        return price
             except Exception as e:
                 logger.warning(f"Failed to get recent daily data: {str(e)}")
 
-            # Method 4: Stock info dict
+            # Method 4: Intraday data if market is open
             try:
-                info = stock.info or {}
-                for key in ['regularMarketPrice', 'previousClose']:
-                    if key in info and info[key]:
-                        price = self._safe_to_float(info[key])
+                # Check if market is likely open (9:30 AM - 4:00 PM EST, Monday-Friday)
+                now = datetime.now()
+                is_market_open = (
+                    now.weekday() < 5 and  # Monday = 0, Friday = 4
+                    9 <= now.hour < 16
+                )
+                
+                if is_market_open:
+                    # Try to get intraday data
+                    hist = stock.history(period="1d", interval="1m", auto_adjust=True, progress=False)
+                    if not hist.empty and 'Close' in hist.columns:
+                        price = self._safe_to_float(hist['Close'].iloc[-1])
                         if price > 0:
-                            logger.info(f"Got current price from info ({key}): {self.format_currency(price)}")
+                            logger.info(f"Got current price from intraday data: {self.format_currency(price)}")
                             return price
             except Exception as e:
-                logger.warning(f"Failed to get stock info: {str(e)}")
+                logger.warning(f"Failed to get intraday data: {str(e)}")
 
             # Method 5: Date range fallback
             try:
-                date_range_days = int(self.config.get('date_range_days', 7))
                 data = yf.download(
                     self.ticker,
-                    start=(datetime.now() - timedelta(days=date_range_days)).strftime('%Y-%m-%d'),
+                    start=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d'),
                     end=datetime.now().strftime('%Y-%m-%d'),
                     progress=False,
                     auto_adjust=True
                 )
-                price = self._safe_to_float(data['Close'] if 'Close' in data else data)
-                if price > 0:
-                    logger.info(f"Got current price from date-range data: {self.format_currency(price)}")
-                    return price
+                if not data.empty and 'Close' in data.columns:
+                    price = self._safe_to_float(data['Close'].iloc[-1])
+                    if price > 0:
+                        logger.info(f"Got current price from date-range data: {self.format_currency(price)}")
+                        return price
             except Exception as e:
                 logger.warning(f"Failed to get date-range data: {str(e)}")
 
-            logger.error(f"Could not get current price for {self.ticker}")
+            logger.error(f"Could not get current price for {self.ticker} using any method")
             return 0.0
+            
         except Exception as e:
             logger.error(f"Error getting current price for {self.ticker}: {str(e)}")
             return 0.0
@@ -1032,7 +1146,7 @@ class EnhancedStockPredictor:
                     logger.warning(f"Enhanced prediction failed ({e}), attempting sparse-data path...")
                     # Sparse-data fallback
                     daily_data = self.get_historical_data(days=self.config['lookback_days'], allow_sparse=True)
-                    intraday_data = self.get_intraday_data(interval="5m", days=1)
+                    intraday_data = self.get_intraday_data()  # Use config defaults
                     return self._predict_with_sparse_data(daily_data, intraday_data)
             else:
                 return self._legacy_prediction()
@@ -1042,7 +1156,7 @@ class EnhancedStockPredictor:
             # Try sparse-data fallback before legacy
             try:
                 daily_data = self.get_historical_data(days=self.config['lookback_days'], allow_sparse=True)
-                intraday_data = self.get_intraday_data(interval="5m", days=1)
+                intraday_data = self.get_intraday_data()  # Use config defaults
                 sparse_pred = self._predict_with_sparse_data(daily_data, intraday_data)
                 if sparse_pred > 0:
                     return sparse_pred
@@ -1063,7 +1177,7 @@ class EnhancedStockPredictor:
             if stock_data.empty or len(stock_data) < min_prediction_days:
                 # Sparse-data fallback instead of raising
                 logger.warning("Insufficient historical data for legacy prediction. Using sparse-data prediction.")
-                intraday_data = self.get_intraday_data(interval="5m", days=1)
+                intraday_data = self.get_intraday_data()  # Use config defaults
                 return self._predict_with_sparse_data(stock_data, intraday_data)
             
             # Get sentiment data for prediction
@@ -1167,7 +1281,7 @@ class EnhancedStockPredictor:
             try:
                 logger.info("Using conservative fallback prediction...")
                 stock_data = self.get_historical_data(days=self.config.get('fallback_days', 5), allow_sparse=True)
-                intraday_data = self.get_intraday_data(interval="5m", days=1)
+                intraday_data = self.get_intraday_data()  # Use config defaults
                 sparse_pred = self._predict_with_sparse_data(stock_data, intraday_data)
                 if sparse_pred > 0:
                     logger.info(f"Sparse fallback prediction: {self.format_currency(sparse_pred)}")
@@ -1267,6 +1381,9 @@ class EnhancedStockPredictor:
                 horizon_hours = int(self.config.get('prediction_hours', 4))
             target_time = (current_time + timedelta(hours=horizon_hours)).strftime('%Y-%m-%d %H:%M')
             
+            # Get LSTM model parameters for display
+            lstm_params = self.get_lstm_model_parameters()
+            
             alert_msg = f"""
 {emoji} STOCK ALERT: {self.ticker} {emoji}
 
@@ -1282,6 +1399,9 @@ TECHNICAL ANALYSIS:
 
 SENTIMENT ANALYSIS:
 {sentiment_analysis}
+
+MODEL PARAMETERS:
+{lstm_params}
 
 RECOMMENDATION:
 {signal_data['reason']}
@@ -1344,6 +1464,98 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             
         except Exception as e:
             logger.error(f"Error sending alert: {str(e)}")
+    
+    def get_lstm_model_parameters(self) -> str:
+        """Get formatted LSTM model parameters for display in alerts"""
+        try:
+            params = []
+            
+            # Core LSTM Architecture Parameters
+            params.append("🧠 LSTM ARCHITECTURE:")
+            params.append(f"• LSTM Layer 1: 128 units (return_sequences=True)")
+            params.append(f"• LSTM Layer 2: 64 units (return_sequences=True)")
+            params.append(f"• LSTM Layer 3: 32 units")
+            params.append(f"• Dense Layer 1: 32 units (ReLU)")
+            params.append(f"• Dense Layer 2: 16 units (ReLU)")
+            params.append(f"• Output Layer: 1 unit (Linear)")
+            params.append(f"• Dropout Rate: 0.2 (LSTM), 0.1 (Dense)")
+            params.append(f"• Attention Mechanism: Enabled")
+            params.append(f"• Batch Normalization: Enabled")
+            
+            # Training Parameters
+            params.append("\n🎯 TRAINING PARAMETERS:")
+            params.append(f"• Learning Rate: {self.config.get('learning_rate', 0.001):.6f}")
+            params.append(f"• Training Epochs: {self.config.get('training_epochs', 50)}")
+            params.append(f"• Batch Size: {self.config.get('batch_size', 32)}")
+            params.append(f"• Loss Function: Mean Squared Error (MSE)")
+            params.append(f"• Optimizer: Adam")
+            params.append(f"• Early Stopping: Patience 15 epochs")
+            params.append(f"• Learning Rate Reduction: Patience 10 epochs")
+            
+            # Data Parameters
+            params.append("\n📊 DATA PARAMETERS:")
+            params.append(f"• Lookback Days: {self.config.get('lookback_days', 10)}")
+            params.append(f"• Prediction Hours: {self.config.get('prediction_hours', 4)}")
+            params.append(f"• Min Required Days: {self.config.get('min_required_days', 10)}")
+            params.append(f"• Min Training Samples: {self.config.get('min_training_samples', 30)}")
+            params.append(f"• Min Prediction Days: {self.config.get('min_prediction_days', 5)}")
+            params.append(f"• Extra Days for Safety: {self.config.get('extra_days_for_safety', 20)}")
+            
+            # Ensemble Weights
+            ensemble_weights = self.config.get('ensemble_weights', {})
+            params.append("\n⚖️ ENSEMBLE WEIGHTS:")
+            params.append(f"• Technical Analysis: {ensemble_weights.get('technical_analysis', 0.5):.1%}")
+            params.append(f"• Sentiment-Based: {ensemble_weights.get('sentiment_based', 0.2):.1%}")
+            params.append(f"• Microstructure: {ensemble_weights.get('microstructure', 0.15):.1%}")
+            params.append(f"• Mean Reversion: {ensemble_weights.get('mean_reversion', 0.15):.1%}")
+            
+            # Feature Toggles
+            params.append("\n🔧 FEATURE TOGGLES:")
+            params.append(f"• Sentiment Analysis: {'✅ Enabled' if self.config.get('enable_sentiment_analysis', True) else '❌ Disabled'}")
+            params.append(f"• Technical Indicators: {'✅ Enabled' if self.config.get('enable_technical_indicators', True) else '❌ Disabled'}")
+            params.append(f"• Enhanced Prediction: {'✅ Enabled' if self.config.get('use_enhanced_prediction', True) else '❌ Disabled'}")
+            
+            # Sentiment Configuration
+            real_time_sentiment = self.config.get('real_time_sentiment', {})
+            params.append("\n📰 SENTIMENT CONFIGURATION:")
+            params.append(f"• News Sentiment: {'✅ Enabled' if real_time_sentiment.get('enable_news_sentiment', True) else '❌ Disabled'}")
+            params.append(f"• Social Sentiment: {'✅ Enabled' if real_time_sentiment.get('enable_social_sentiment', True) else '❌ Disabled'}")
+            params.append(f"• Earnings Impact: {'✅ Enabled' if real_time_sentiment.get('enable_earnings_impact', True) else '❌ Disabled'}")
+            params.append(f"• Analyst Impact: {'✅ Enabled' if real_time_sentiment.get('enable_analyst_impact', True) else '❌ Disabled'}")
+            params.append(f"• Options Flow: {'✅ Enabled' if real_time_sentiment.get('enable_options_flow', True) else '❌ Disabled'}")
+            params.append(f"• Sentiment Hours: {real_time_sentiment.get('sentiment_hours', 24)}h")
+            
+            # Microstructure Configuration
+            microstructure_features = self.config.get('microstructure_features', {})
+            params.append("\n🔬 MICROSTRUCTURE FEATURES:")
+            params.append(f"• Spread Analysis: {'✅ Enabled' if microstructure_features.get('enable_spread_analysis', True) else '❌ Disabled'}")
+            params.append(f"• Volume Analysis: {'✅ Enabled' if microstructure_features.get('enable_volume_analysis', True) else '❌ Disabled'}")
+            params.append(f"• Market Efficiency: {'✅ Enabled' if microstructure_features.get('enable_market_efficiency', True) else '❌ Disabled'}")
+            params.append(f"• Time Adjustments: {'✅ Enabled' if microstructure_features.get('enable_time_based_adjustments', True) else '❌ Disabled'}")
+            
+            # Prediction Bounds
+            prediction_bounds = self.config.get('prediction_bounds', {})
+            params.append("\n📈 PREDICTION BOUNDS:")
+            params.append(f"• Max Daily Change: {prediction_bounds.get('max_daily_change', 0.2):.1%}")
+            params.append(f"• Max Intraday Change: {prediction_bounds.get('max_intraday_change', 0.15):.1%}")
+            params.append(f"• Confidence Dampening: {prediction_bounds.get('confidence_dampening', 0.5):.1%}")
+            
+            # Intraday Settings
+            params.append("\n⏰ INTRADAY SETTINGS:")
+            params.append(f"• Interval: {self.config.get('intraday_interval', '5m')}")
+            params.append(f"• Days: {self.config.get('intraday_days', 5)}")
+            
+            # Trading Thresholds
+            params.append("\n🎯 TRADING THRESHOLDS:")
+            params.append(f"• Buy Threshold: {self.config.get('buy_threshold', 5):.1f}%")
+            params.append(f"• Sell Threshold: {self.config.get('sell_threshold', -5):.1f}%")
+            params.append(f"• Confidence Threshold: {self.config.get('confidence_threshold', 0.7):.1%}")
+            
+            return "\n".join(params)
+            
+        except Exception as e:
+            logger.error(f"Error getting LSTM model parameters: {str(e)}")
+            return "Unable to retrieve model parameters"
     
     def get_market_analysis(self) -> str:
         """Get detailed market analysis with technical indicators"""
@@ -1510,7 +1722,8 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                     logger.error(f"Failed to send Slack webhook: {response.status_code}")
                     return None
             else:
-                logger.warning("No Slack credentials configured")
+                logger.warning("Slack notifications disabled - no credentials configured")
+                logger.info("To enable Slack notifications, set SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN environment variables")
                 return None
         except Exception as e:
             logger.error(f"Error sending Slack notification: {str(e)}")
@@ -1542,9 +1755,15 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 'confidence': 0.0
             })
 
-    def get_intraday_data(self, interval: str = "5m", days: int = 5) -> pd.DataFrame:
+    def get_intraday_data(self, interval: str = None, days: int = None) -> pd.DataFrame:
         """Fetch intraday stock data for more precise 4-hour predictions"""
         try:
+            # Use config values if not provided
+            if interval is None:
+                interval = self.config.get('intraday_interval', '5m')
+            if days is None:
+                days = self.config.get('intraday_days', 5)
+                
             logger.info(f"Fetching {interval} intraday data for {self.ticker}")
             
             # Get intraday data
@@ -1617,8 +1836,12 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         try:
             features = {}
             
+            # Get intraday settings from config
+            intraday_interval = self.config.get('intraday_interval', '5m')
+            intraday_days = self.config.get('intraday_days', 1)
+            
             # Get recent intraday data
-            intraday_data = self.get_intraday_data(interval="5m", days=1)
+            intraday_data = self.get_intraday_data(interval=intraday_interval, days=intraday_days)
             
             if not intraday_data.empty and len(intraday_data) > 10:
                 # Bid-ask spread proxy (using high-low range)
@@ -1683,45 +1906,63 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         try:
             sentiment_scores = {}
             
-            # 1. Real-time news sentiment (last 4 hours)
-            try:
-                # Use Alpha Vantage News API or similar
-                news_sentiment = self.get_recent_news_sentiment(hours=4)
-                sentiment_scores['news_sentiment'] = news_sentiment
-            except Exception as e:
-                logger.warning(f"Failed to get real-time news: {str(e)}")
+            # Get sentiment configuration from config
+            real_time_sentiment_config = self.config.get('real_time_sentiment', {})
+            sentiment_hours = real_time_sentiment_config.get('sentiment_hours', 24)
+            
+            # 1. Real-time news sentiment
+            if real_time_sentiment_config.get('enable_news_sentiment', True):
+                try:
+                    news_sentiment = self.get_recent_news_sentiment(hours=sentiment_hours)
+                    sentiment_scores['news_sentiment'] = news_sentiment
+                except Exception as e:
+                    logger.warning(f"Failed to get real-time news: {str(e)}")
+                    sentiment_scores['news_sentiment'] = 0.0
+            else:
                 sentiment_scores['news_sentiment'] = 0.0
             
             # 2. Social media sentiment (Twitter/X, Reddit)
-            try:
-                social_sentiment = self.get_social_media_sentiment(hours=4)
-                sentiment_scores['social_sentiment'] = social_sentiment
-            except Exception as e:
-                logger.warning(f"Failed to get social media sentiment: {str(e)}")
+            if real_time_sentiment_config.get('enable_social_sentiment', True):
+                try:
+                    social_sentiment = self.get_social_media_sentiment(hours=sentiment_hours)
+                    sentiment_scores['social_sentiment'] = social_sentiment
+                except Exception as e:
+                    logger.warning(f"Failed to get social media sentiment: {str(e)}")
+                    sentiment_scores['social_sentiment'] = 0.0
+            else:
                 sentiment_scores['social_sentiment'] = 0.0
             
             # 3. Earnings calendar impact
-            try:
-                earnings_impact = self.get_earnings_calendar_impact()
-                sentiment_scores['earnings_impact'] = earnings_impact
-            except Exception as e:
-                logger.warning(f"Failed to get earnings impact: {str(e)}")
+            if real_time_sentiment_config.get('enable_earnings_impact', True):
+                try:
+                    earnings_impact = self.get_earnings_calendar_impact()
+                    sentiment_scores['earnings_impact'] = earnings_impact
+                except Exception as e:
+                    logger.warning(f"Failed to get earnings impact: {str(e)}")
+                    sentiment_scores['earnings_impact'] = 0.0
+            else:
                 sentiment_scores['earnings_impact'] = 0.0
             
             # 4. Analyst rating changes
-            try:
-                analyst_impact = self.get_analyst_rating_changes()
-                sentiment_scores['analyst_impact'] = analyst_impact
-            except Exception as e:
-                logger.warning(f"Failed to get analyst changes: {str(e)}")
+            if real_time_sentiment_config.get('enable_analyst_impact', True):
+                try:
+                    analyst_impact = self.get_analyst_rating_changes()
+                    sentiment_scores['analyst_impact'] = analyst_impact
+                except Exception as e:
+                    logger.warning(f"Failed to get analyst changes: {str(e)}")
+                    sentiment_scores['analyst_impact'] = 0.0
+            else:
                 sentiment_scores['analyst_impact'] = 0.0
             
             # 5. Options flow sentiment
-            try:
-                options_sentiment = self.get_options_flow_sentiment()
-                sentiment_scores['options_sentiment'] = options_sentiment
-            except Exception as e:
-                logger.warning(f"Failed to get options flow: {str(e)}")
+            if real_time_sentiment_config.get('enable_options_flow', True):
+                try:
+                    options_sentiment = self.get_options_flow_sentiment()
+                    sentiment_scores['options_sentiment'] = options_sentiment
+                except Exception as e:
+                    logger.warning(f"Failed to get options flow: {str(e)}")
+                    sentiment_scores['options_sentiment'] = 0.0
+            else:
                 sentiment_scores['options_sentiment'] = 0.0
             
             return sentiment_scores
@@ -1903,49 +2144,64 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             
             # Get multiple data sources
             daily_data = self.get_historical_data(days=self.config['lookback_days'])
-            intraday_data = self.get_intraday_data(interval="5m", days=5)
+            intraday_data = self.get_intraday_data()  # Use config defaults
             microstructure_features = self.get_market_microstructure_features()
             real_time_sentiment = self.get_real_time_sentiment()
             
             if daily_data.empty:
                 raise ValueError(f"No daily data available for {self.ticker}")
             
+            # Get ensemble weights from config
+            ensemble_weights = self.config.get('ensemble_weights', {
+                'technical_analysis': 0.5,
+                'sentiment_based': 0.2,
+                'microstructure': 0.15,
+                'mean_reversion': 0.15
+            })
+            
+            # Get prediction bounds from config
+            prediction_bounds = self.config.get('prediction_bounds', {
+                'max_daily_change': 0.2,
+                'max_intraday_change': 0.15,
+                'confidence_dampening': 0.5
+            })
+            
             # Ensemble prediction using multiple models
             predictions = []
             weights = []
             
-            # 1. Technical Analysis Model (40% weight)
+            # 1. Technical Analysis Model
             try:
                 tech_prediction = float(self._technical_analysis_prediction(daily_data, intraday_data))
                 predictions.append(tech_prediction)
-                weights.append(0.4)
+                weights.append(ensemble_weights.get('technical_analysis', 0.5))
                 logger.info(f"Technical prediction: {self.format_currency(tech_prediction)}")
             except Exception as e:
                 logger.warning(f"Technical analysis failed: {str(e)}")
             
-            # 2. Sentiment-Based Model (25% weight)
+            # 2. Sentiment-Based Model
             try:
                 sentiment_prediction = float(self._sentiment_based_prediction(daily_data, real_time_sentiment))
                 predictions.append(sentiment_prediction)
-                weights.append(0.25)
+                weights.append(ensemble_weights.get('sentiment_based', 0.2))
                 logger.info(f"Sentiment prediction: {self.format_currency(sentiment_prediction)}")
             except Exception as e:
                 logger.warning(f"Sentiment analysis failed: {str(e)}")
             
-            # 3. Microstructure Model (20% weight)
+            # 3. Microstructure Model
             try:
                 micro_prediction = float(self._microstructure_prediction(daily_data, microstructure_features))
                 predictions.append(micro_prediction)
-                weights.append(0.2)
+                weights.append(ensemble_weights.get('microstructure', 0.15))
                 logger.info(f"Microstructure prediction: {self.format_currency(micro_prediction)}")
             except Exception as e:
                 logger.warning(f"Microstructure analysis failed: {str(e)}")
             
-            # 4. Mean Reversion Model (15% weight)
+            # 4. Mean Reversion Model
             try:
                 reversion_prediction = float(self._mean_reversion_prediction(daily_data, intraday_data))
                 predictions.append(reversion_prediction)
-                weights.append(0.15)
+                weights.append(ensemble_weights.get('mean_reversion', 0.15))
                 logger.info(f"Mean reversion prediction: {self.format_currency(reversion_prediction)}")
             except Exception as e:
                 logger.warning(f"Mean reversion analysis failed: {str(e)}")
@@ -1962,7 +2218,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 # Apply confidence adjustment based on prediction consistency
                 prediction_std = np.std(predictions)
                 current_price = daily_data['Close'].iloc[-1]
-                price_std = current_price * 0.02  # 2% of current price
+                price_std = current_price * prediction_bounds.get('confidence_dampening', 0.5)  # Use config value
                 
                 # Reduce confidence if predictions are inconsistent
                 if prediction_std > price_std:
@@ -2024,17 +2280,36 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         """Sentiment-based prediction"""
         current_price = daily_data['Close'].iloc[-1]
         
+        # Get sentiment weights from config
+        real_time_sentiment_config = self.config.get('real_time_sentiment', {})
+        
+        # Define default sentiment weights based on config settings
+        sentiment_weights = {}
+        
+        if real_time_sentiment_config.get('enable_news_sentiment', True):
+            sentiment_weights['news_sentiment'] = 0.3
+        if real_time_sentiment_config.get('enable_social_sentiment', True):
+            sentiment_weights['social_sentiment'] = 0.25
+        if real_time_sentiment_config.get('enable_earnings_impact', True):
+            sentiment_weights['earnings_impact'] = 0.2
+        if real_time_sentiment_config.get('enable_analyst_impact', True):
+            sentiment_weights['analyst_impact'] = 0.15
+        if real_time_sentiment_config.get('enable_options_flow', True):
+            sentiment_weights['options_sentiment'] = 0.1
+        
+        # If no weights defined, use defaults
+        if not sentiment_weights:
+            sentiment_weights = {
+                'news_sentiment': 0.3,
+                'social_sentiment': 0.25,
+                'earnings_impact': 0.2,
+                'analyst_impact': 0.15,
+                'options_sentiment': 0.1
+            }
+        
         # Combine all sentiment sources
         total_sentiment = 0.0
         sentiment_weight = 0.0
-        
-        sentiment_weights = {
-            'news_sentiment': 0.3,
-            'social_sentiment': 0.25,
-            'earnings_impact': 0.2,
-            'analyst_impact': 0.15,
-            'options_sentiment': 0.1
-        }
         
         for sentiment_type, weight in sentiment_weights.items():
             if sentiment_type in sentiment_data:
@@ -2053,33 +2328,38 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         """Market microstructure-based prediction"""
         current_price = daily_data['Close'].iloc[-1]
         
+        # Get microstructure features config
+        microstructure_config = self.config.get('microstructure_features', {})
+        
         # Combine microstructure features
         prediction_change = 0.0
         
         # Spread impact
-        if 'avg_spread_proxy' in micro_features:
+        if microstructure_config.get('enable_spread_analysis', True) and 'avg_spread_proxy' in micro_features:
             spread_impact = micro_features['avg_spread_proxy'] * 0.1
             prediction_change += spread_impact
         
         # Volume trend impact
-        if 'volume_trend' in micro_features:
+        if microstructure_config.get('enable_volume_analysis', True) and 'volume_trend' in micro_features:
             volume_impact = micro_features['volume_trend'] * 0.05
             prediction_change += volume_impact
         
         # Market efficiency impact
-        if 'market_efficiency' in micro_features:
+        if microstructure_config.get('enable_market_efficiency', True) and 'market_efficiency' in micro_features:
             efficiency_impact = micro_features['market_efficiency'] * 0.02
             prediction_change += efficiency_impact
         
         # Time-based adjustments
-        if 'hours_until_close' in micro_features:
+        if microstructure_config.get('enable_time_based_adjustments', True) and 'hours_until_close' in micro_features:
             hours_left = micro_features['hours_until_close']
             if hours_left <= 2:
                 # End-of-day effect
                 prediction_change *= 0.5  # Reduce prediction magnitude near close
         
-        # Apply conservative bounds
-        prediction_change = max(-0.015, min(0.015, prediction_change))
+        # Apply conservative bounds from config
+        prediction_bounds = self.config.get('prediction_bounds', {})
+        max_intraday_change = prediction_bounds.get('max_intraday_change', 0.15)
+        prediction_change = max(-max_intraday_change, min(max_intraday_change, prediction_change))
         
         return current_price * (1 + prediction_change)
     
@@ -2299,8 +2579,26 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             try:
                 sentiment = self.get_real_time_sentiment()
                 if sentiment:
-                    # Weighted average of provided components
-                    weights = {'news_sentiment': 0.3, 'social_sentiment': 0.4, 'earnings_impact': 0.2, 'analyst_impact': 0.05, 'options_sentiment': 0.05}
+                    # Get sentiment weights from config
+                    real_time_sentiment_config = self.config.get('real_time_sentiment', {})
+                    
+                    # Define sentiment weights based on config settings
+                    weights = {}
+                    if real_time_sentiment_config.get('enable_news_sentiment', True):
+                        weights['news_sentiment'] = 0.3
+                    if real_time_sentiment_config.get('enable_social_sentiment', True):
+                        weights['social_sentiment'] = 0.4
+                    if real_time_sentiment_config.get('enable_earnings_impact', True):
+                        weights['earnings_impact'] = 0.2
+                    if real_time_sentiment_config.get('enable_analyst_impact', True):
+                        weights['analyst_impact'] = 0.05
+                    if real_time_sentiment_config.get('enable_options_flow', True):
+                        weights['options_sentiment'] = 0.05
+                    
+                    # If no weights defined, use defaults
+                    if not weights:
+                        weights = {'news_sentiment': 0.3, 'social_sentiment': 0.4, 'earnings_impact': 0.2, 'analyst_impact': 0.05, 'options_sentiment': 0.05}
+                    
                     total_w = 0.0
                     total_s = 0.0
                     for k, w in weights.items():
@@ -2312,8 +2610,10 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             except Exception:
                 pass
 
-            # Clamp to conservative bounds
-            predicted_change = max(-0.03, min(0.03, predicted_change))
+            # Clamp to conservative bounds from config
+            prediction_bounds = self.config.get('prediction_bounds', {})
+            max_daily_change = prediction_bounds.get('max_daily_change', 0.2)
+            predicted_change = max(-max_daily_change, min(max_daily_change, predicted_change))
             return current_price * (1.0 + predicted_change)
         except Exception as e:
             logger.warning(f"Sparse-data prediction failed: {e}")
@@ -2322,26 +2622,58 @@ Data Sources: Yahoo Finance, Reddit, News APIs
     def resolve_exchange_symbol(self, symbol: str) -> str:
         """Resolve a base symbol to a specific exchange listing to ensure correct currency.
         If the symbol already includes an exchange suffix, return as-is.
-        Prefer Canadian TSX/TSXV listings when available for dual-listed names.
+        For US stocks, prefer the primary US listing.
         """
         try:
             # If already has known suffix, keep it
-            known_suffixes = ('.TO', '.V', '.CN', '.NE', '.PA', '.L', '.AX')
+            known_suffixes = ('.TO', '.V', '.CN', '.NE', '.PA', '.L', '.AX', '.MI', '.AS', '.SW')
             if any(symbol.endswith(sfx) for sfx in known_suffixes):
                 return symbol
 
             base = symbol
+            
+            # For US stocks, try the base symbol first and prefer it if it works
+            try:
+                t = yf.Ticker(base)
+                hist = t.history(period="1d", progress=False)
+                if not hist.empty:
+                    # Check if it's a US stock (USD currency)
+                    try:
+                        info = t.info or {}
+                        currency = info.get('currency', 'USD')
+                        if currency.upper() == 'USD':
+                            logger.info(f"Using US listing for {base} (USD)")
+                            return base
+                    except Exception:
+                        # If we can't get info, assume it's working and return base
+                        logger.info(f"Using base symbol {base} (assumed USD)")
+                        return base
+            except Exception:
+                pass
+
+            # Only try other exchanges if the base symbol doesn't work
             def _valid(sym: str):
                 try:
                     t = yf.Ticker(sym)
-                    hist = t.history(period="5d")
-                    cur = (t.info or {}).get('currency')
-                    return (not hist.empty), (cur.upper() if isinstance(cur, str) else None)
+                    hist = t.history(period="1d", progress=False)
+                    if hist.empty:
+                        return False, None
+                    try:
+                        info = t.info or {}
+                        cur = info.get('currency', 'USD')
+                        return True, (cur.upper() if isinstance(cur, str) else 'USD')
+                    except Exception:
+                        return True, 'USD'  # Assume USD if we can't get currency info
                 except Exception:
                     return False, None
 
             # Check base symbol first
             base_ok, base_ccy = _valid(base)
+            if base_ok:
+                logger.info(f"Using base symbol {base} with currency {base_ccy}")
+                return base
+
+            # Only probe other exchanges if base symbol failed
             # Probe common Canadian suffixes
             candidates = [base + '.TO', base + '.V', base + '.CN', base + '.NE']
             for cand in candidates:
@@ -2362,13 +2694,10 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                     logger.info(f"Resolved {base} to local listing {cand} ({ccy})")
                     return cand
 
-            # If base exists and has non-USD currency, keep it
-            if base_ok and base_ccy and base_ccy != 'USD':
-                logger.info(f"Keeping {base} with currency {base_ccy}")
-                return base
-
-            # Otherwise keep original
-            return base
+            # If nothing works, return the original symbol
+            logger.warning(f"Could not resolve exchange for {symbol}, using original")
+            return symbol
+            
         except Exception as e:
             logger.warning(f"Failed to resolve exchange for {symbol}: {e}")
             return symbol
@@ -2487,6 +2816,72 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 logger.info(f"Uploaded chart to Slack: {os.path.basename(file_path)}")
         except Exception as e:
             logger.warning(f"Failed to upload file to Slack: {e}")
+
+    def validate_ticker(self, ticker: str) -> bool:
+        """Validate that a ticker symbol exists and has data"""
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # Try to get basic info
+            try:
+                info = stock.info or {}
+                if not info:
+                    return False
+            except Exception:
+                pass
+            
+            # Try to get recent history
+            try:
+                hist = stock.history(period="1d", progress=False)
+                if hist.empty:
+                    return False
+            except Exception:
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    def get_ticker_info(self) -> dict:
+        """Get comprehensive ticker information"""
+        try:
+            stock = yf.Ticker(self.ticker)
+            info = stock.info or {}
+            
+            # Get basic info
+            ticker_info = {
+                'symbol': self.ticker,
+                'name': info.get('longName', info.get('shortName', 'Unknown')),
+                'currency': info.get('currency', 'USD'),
+                'exchange': info.get('exchange', 'Unknown'),
+                'market_cap': info.get('marketCap', 0),
+                'sector': info.get('sector', 'Unknown'),
+                'industry': info.get('industry', 'Unknown'),
+                'country': info.get('country', 'Unknown')
+            }
+            
+            # Get current price
+            current_price = self.get_current_price()
+            ticker_info['current_price'] = current_price
+            ticker_info['formatted_price'] = self.format_currency(current_price)
+            
+            return ticker_info
+            
+        except Exception as e:
+            logger.error(f"Error getting ticker info: {str(e)}")
+            return {
+                'symbol': self.ticker,
+                'name': 'Unknown',
+                'currency': 'USD',
+                'exchange': 'Unknown',
+                'market_cap': 0,
+                'sector': 'Unknown',
+                'industry': 'Unknown',
+                'country': 'Unknown',
+                'current_price': 0,
+                'formatted_price': '$0.00 USD'
+            }
 
 def main():
     """Main function to run the enhanced stock predictor"""

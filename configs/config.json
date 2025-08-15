@@ -1,5 +1,5 @@
 {
-    "ticker": "WEA",
+    "ticker": "UNH",
     "lookback_days": 10,
     "prediction_hours": 4,
     "alert_time": "12:00",
@@ -8,13 +8,13 @@
     "confidence_threshold": 0.7,
     "training_epochs": 50, 
     "batch_size": 32, 
-    "learning_rate": 0.001, 
+    "learning_rate": 0.0001, 
     "enable_sentiment_analysis": true, 
     "enable_technical_indicators": true,
     "log_level": "INFO",
     "save_alerts_to_file": true,
-    "alert_file": "trading_alerts.txt",
-    "log_file": "stock_alerts.log",
+    "alert_file": "logs/trading_alerts.txt",
+    "log_file": "logs/stock_alerts.log",
     "min_required_days": 10,
     "min_training_samples": 30,
     "min_prediction_days": 5,
@@ -55,5 +55,11 @@
         "max_daily_change": 0.2,
         "max_intraday_change": 0.15,
         "confidence_dampening": 0.5
+    },
+    "authentication": {
+        "reddit_required": true,
+        "slack_required": false,
+        "reddit_credentials_path": "secrets/",
+        "slack_credentials_env": "~/.env"
     }
 } 
