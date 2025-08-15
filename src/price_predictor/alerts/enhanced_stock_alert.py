@@ -1504,10 +1504,10 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             # Ensemble Weights
             ensemble_weights = self.config.get('ensemble_weights', {})
             params.append("\n⚖️ ENSEMBLE WEIGHTS:")
-            params.append(f"• Technical Analysis: {ensemble_weights.get('technical_analysis', 0.5):.1%}")
-            params.append(f"• Sentiment-Based: {ensemble_weights.get('sentiment_based', 0.2):.1%}")
-            params.append(f"• Microstructure: {ensemble_weights.get('microstructure', 0.15):.1%}")
-            params.append(f"• Mean Reversion: {ensemble_weights.get('mean_reversion', 0.15):.1%}")
+            params.append(f"• Technical Analysis: {ensemble_weights.get('technical_analysis', 0.0):.1%}")
+            params.append(f"• Sentiment-Based: {ensemble_weights.get('sentiment_based', 0.0):.1%}")
+            params.append(f"• Microstructure: {ensemble_weights.get('microstructure', 0.0):.1%}")
+            params.append(f"• Mean Reversion: {ensemble_weights.get('mean_reversion', 0.0):.1%}")
             
             # Feature Toggles
             params.append("\n🔧 FEATURE TOGGLES:")
@@ -1536,9 +1536,9 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             # Prediction Bounds
             prediction_bounds = self.config.get('prediction_bounds', {})
             params.append("\n📈 PREDICTION BOUNDS:")
-            params.append(f"• Max Daily Change: {prediction_bounds.get('max_daily_change', 0.2):.1%}")
-            params.append(f"• Max Intraday Change: {prediction_bounds.get('max_intraday_change', 0.15):.1%}")
-            params.append(f"• Confidence Dampening: {prediction_bounds.get('confidence_dampening', 0.5):.1%}")
+            params.append(f"• Max Daily Change: {prediction_bounds.get('max_daily_change', 0.0):.1%}")
+            params.append(f"• Max Intraday Change: {prediction_bounds.get('max_intraday_change', 0.0):.1%}")
+            params.append(f"• Confidence Dampening: {prediction_bounds.get('confidence_dampening', 0.0):.1%}")
             
             # Intraday Settings
             params.append("\n⏰ INTRADAY SETTINGS:")
@@ -2151,20 +2151,11 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             if daily_data.empty:
                 raise ValueError(f"No daily data available for {self.ticker}")
             
-            # Get ensemble weights from config
-            ensemble_weights = self.config.get('ensemble_weights', {
-                'technical_analysis': 0.5,
-                'sentiment_based': 0.2,
-                'microstructure': 0.15,
-                'mean_reversion': 0.15
-            })
+            # Get ensemble weights from config (fully dynamic)
+            ensemble_weights = self.config.get('ensemble_weights', {})
             
-            # Get prediction bounds from config
-            prediction_bounds = self.config.get('prediction_bounds', {
-                'max_daily_change': 0.2,
-                'max_intraday_change': 0.15,
-                'confidence_dampening': 0.5
-            })
+            # Get prediction bounds from config (fully dynamic)
+            prediction_bounds = self.config.get('prediction_bounds', {})
             
             # Ensemble prediction using multiple models
             predictions = []
@@ -2174,7 +2165,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             try:
                 tech_prediction = float(self._technical_analysis_prediction(daily_data, intraday_data))
                 predictions.append(tech_prediction)
-                weights.append(ensemble_weights.get('technical_analysis', 0.5))
+                weights.append(ensemble_weights.get('technical_analysis', 0.0))
                 logger.info(f"Technical prediction: {self.format_currency(tech_prediction)}")
             except Exception as e:
                 logger.warning(f"Technical analysis failed: {str(e)}")
@@ -2183,7 +2174,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             try:
                 sentiment_prediction = float(self._sentiment_based_prediction(daily_data, real_time_sentiment))
                 predictions.append(sentiment_prediction)
-                weights.append(ensemble_weights.get('sentiment_based', 0.2))
+                weights.append(ensemble_weights.get('sentiment_based', 0.0))
                 logger.info(f"Sentiment prediction: {self.format_currency(sentiment_prediction)}")
             except Exception as e:
                 logger.warning(f"Sentiment analysis failed: {str(e)}")
@@ -2192,7 +2183,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             try:
                 micro_prediction = float(self._microstructure_prediction(daily_data, microstructure_features))
                 predictions.append(micro_prediction)
-                weights.append(ensemble_weights.get('microstructure', 0.15))
+                weights.append(ensemble_weights.get('microstructure', 0.0))
                 logger.info(f"Microstructure prediction: {self.format_currency(micro_prediction)}")
             except Exception as e:
                 logger.warning(f"Microstructure analysis failed: {str(e)}")
@@ -2201,7 +2192,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
             try:
                 reversion_prediction = float(self._mean_reversion_prediction(daily_data, intraday_data))
                 predictions.append(reversion_prediction)
-                weights.append(ensemble_weights.get('mean_reversion', 0.15))
+                weights.append(ensemble_weights.get('mean_reversion', 0.0))
                 logger.info(f"Mean reversion prediction: {self.format_currency(reversion_prediction)}")
             except Exception as e:
                 logger.warning(f"Mean reversion analysis failed: {str(e)}")
@@ -2218,7 +2209,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
                 # Apply confidence adjustment based on prediction consistency
                 prediction_std = np.std(predictions)
                 current_price = daily_data['Close'].iloc[-1]
-                price_std = current_price * prediction_bounds.get('confidence_dampening', 0.5)  # Use config value
+                price_std = current_price * prediction_bounds.get('confidence_dampening', 0.0)  # Use config value
                 
                 # Reduce confidence if predictions are inconsistent
                 if prediction_std > price_std:
@@ -2358,7 +2349,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
         
         # Apply conservative bounds from config
         prediction_bounds = self.config.get('prediction_bounds', {})
-        max_intraday_change = prediction_bounds.get('max_intraday_change', 0.15)
+        max_intraday_change = prediction_bounds.get('max_intraday_change', 0.0)
         prediction_change = max(-max_intraday_change, min(max_intraday_change, prediction_change))
         
         return current_price * (1 + prediction_change)
@@ -2612,7 +2603,7 @@ Data Sources: Yahoo Finance, Reddit, News APIs
 
             # Clamp to conservative bounds from config
             prediction_bounds = self.config.get('prediction_bounds', {})
-            max_daily_change = prediction_bounds.get('max_daily_change', 0.2)
+            max_daily_change = prediction_bounds.get('max_daily_change', 0.0)
             predicted_change = max(-max_daily_change, min(max_daily_change, predicted_change))
             return current_price * (1.0 + predicted_change)
         except Exception as e:
