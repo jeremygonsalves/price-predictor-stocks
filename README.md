@@ -479,8 +479,352 @@ python tests/test_morning_analysis.py
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+We welcome contributions to improve the stock prediction system! This project uses a **protected main branch** that requires pull requests for all changes.
 
-## License
+### 🛡️ **Repository Protection**
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This repository has **branch protection enabled**:
+- ✅ **Pull requests required** before merging
+- ✅ **Code review mandatory** for all changes
+- ✅ **Force pushes blocked** for security
+- ✅ **Commit signature verification** required
+- ✅ **Direct pushes to main blocked** for contributors
+
+### 📋 **Contribution Workflow**
+
+#### **For External Contributors:**
+
+1. **Fork the Repository**
+   ```bash
+   # Fork on GitHub first, then clone your fork
+   git clone https://github.com/YOUR_USERNAME/price-predictor-stocks.git
+   cd price-predictor-stocks
+   ```
+
+2. **Set Up Development Environment**
+   ```bash
+   # Create virtual environment
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   
+   # Install dependencies
+   pip install -r requirements.txt
+   
+   # Run setup
+   python setup.py
+   ```
+
+3. **Create Feature Branch**
+   ```bash
+   # Create and switch to feature branch
+   git checkout -b feature/your-feature-name
+   
+   # Or for bug fixes
+   git checkout -b fix/your-bug-description
+   ```
+
+4. **Make Your Changes**
+   - Follow the coding standards below
+   - Add tests for new features
+   - Update documentation as needed
+   - Ensure all tests pass
+
+5. **Test Your Changes**
+   ```bash
+   # Run authentication tests
+   python tests/test_authentication.py
+   
+   # Run system tests
+   python tests/test_system.py
+   
+   # Test your specific feature
+   python tests/test_your_feature.py
+   ```
+
+6. **Commit Your Changes**
+   ```bash
+   # Add your changes
+   git add .
+   
+   # Commit with descriptive message
+   git commit -m "feat: add new sentiment analysis feature
+   
+   - Added support for Twitter sentiment analysis
+   - Updated config.json with new sentiment weights
+   - Added comprehensive tests for new feature
+   - Updated documentation with usage examples"
+   ```
+
+7. **Push to Your Fork**
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+8. **Create Pull Request**
+   - Go to your fork on GitHub
+   - Click "Compare & pull request"
+   - Fill out the PR template (see below)
+   - Request review from maintainers
+
+#### **For Repository Collaborators:**
+
+1. **Create Feature Branch**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Make Changes and Test**
+   ```bash
+   # Make your changes
+   # Run tests
+   python tests/test_authentication.py
+   ```
+
+3. **Create Pull Request**
+   - Push to your feature branch
+   - Create PR to main branch
+   - Get approval from another collaborator
+
+### 📝 **Pull Request Guidelines**
+
+#### **PR Template**
+When creating a pull request, please include:
+
+```markdown
+## Description
+Brief description of changes made
+
+## Type of Change
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Documentation update
+- [ ] Test addition/update
+
+## Testing
+- [ ] All existing tests pass
+- [ ] New tests added for new functionality
+- [ ] Manual testing completed
+- [ ] Authentication tests pass
+- [ ] System tests pass
+
+## Checklist
+- [ ] Code follows the style guidelines
+- [ ] Self-review of code completed
+- [ ] Code is commented, particularly in hard-to-understand areas
+- [ ] Documentation updated
+- [ ] No sensitive data exposed
+- [ ] Branch protection rules followed
+
+## Screenshots (if applicable)
+Add screenshots for UI changes
+
+## Additional Notes
+Any additional information or context
+```
+
+#### **Commit Message Format**
+Use conventional commit format:
+```
+type(scope): description
+
+[optional body]
+
+[optional footer]
+```
+
+**Types:**
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation changes
+- `style`: Code style changes (formatting, etc.)
+- `refactor`: Code refactoring
+- `test`: Adding or updating tests
+- `chore`: Maintenance tasks
+
+**Examples:**
+```bash
+git commit -m "feat(alerts): add LSTM model parameters to Slack messages"
+git commit -m "fix(price): resolve UNH price fetching issue with currency detection"
+git commit -m "docs(readme): update authentication setup instructions"
+```
+
+### 🏗️ **Development Standards**
+
+#### **Code Style**
+- Follow PEP 8 Python style guide
+- Use meaningful variable and function names
+- Add docstrings to all functions and classes
+- Keep functions focused and under 50 lines when possible
+- Use type hints for function parameters and return values
+
+#### **File Organization**
+```
+src/price_predictor/
+├── alerts/           # Alert and notification modules
+├── analysis/         # Analysis and prediction modules
+├── utils/           # Utility functions (create if needed)
+└── models/          # ML model implementations (create if needed)
+```
+
+#### **Configuration Management**
+- All configurable values should be in `configs/config.json`
+- No hardcoded values in the codebase
+- Use config inheritance pattern established in the codebase
+- Document new configuration options in README.md
+
+#### **Error Handling**
+- Use try-except blocks for external API calls
+- Log errors with appropriate log levels
+- Provide meaningful error messages
+- Implement fallback mechanisms where possible
+
+#### **Testing Requirements**
+- Add tests for all new features
+- Maintain test coverage above 80%
+- Test both success and failure scenarios
+- Mock external API calls in tests
+- Test authentication flows
+
+### 🔐 **Security Guidelines**
+
+#### **Credential Management**
+- **NEVER** commit credentials or API keys
+- Use environment variables or `secrets/` directory
+- Update `.gitignore` for new sensitive files
+- Test authentication flows without real credentials
+
+#### **Data Privacy**
+- Don't log sensitive user data
+- Sanitize inputs to prevent injection attacks
+- Validate all external data sources
+- Follow principle of least privilege
+
+### 🧪 **Testing Guidelines**
+
+#### **Running Tests**
+```bash
+# Run all tests
+python -m pytest tests/
+
+# Run specific test file
+python tests/test_authentication.py
+
+# Run with coverage
+python -m pytest tests/ --cov=src/price_predictor
+
+# Run authentication tests
+python tests/test_authentication.py
+```
+
+#### **Writing Tests**
+```python
+def test_new_feature():
+    """Test description of what is being tested"""
+    # Arrange
+    predictor = EnhancedStockPredictor("AAPL")
+    
+    # Act
+    result = predictor.new_feature()
+    
+    # Assert
+    assert result is not None
+    assert isinstance(result, expected_type)
+```
+
+### 📚 **Documentation Standards**
+
+#### **Code Documentation**
+- Add docstrings to all functions and classes
+- Include parameter types and return types
+- Provide usage examples for complex functions
+- Update README.md for new features
+
+#### **API Documentation**
+- Document all public methods
+- Include parameter descriptions
+- Provide return value explanations
+- Add usage examples
+
+### 🚀 **Feature Development Process**
+
+1. **Proposal**: Open an issue describing the feature
+2. **Discussion**: Get feedback from maintainers
+3. **Implementation**: Follow the contribution workflow
+4. **Testing**: Ensure comprehensive test coverage
+5. **Review**: Get code review from maintainers
+6. **Merge**: Merge after approval
+
+### 🐛 **Bug Report Guidelines**
+
+When reporting bugs, please include:
+
+```markdown
+## Bug Description
+Clear description of the bug
+
+## Steps to Reproduce
+1. Step 1
+2. Step 2
+3. Step 3
+
+## Expected Behavior
+What should happen
+
+## Actual Behavior
+What actually happens
+
+## Environment
+- OS: [e.g., macOS 14.0]
+- Python Version: [e.g., 3.9.0]
+- Dependencies: [list relevant packages]
+
+## Additional Context
+Any other relevant information
+```
+
+### 🤝 **Getting Help**
+
+- **Issues**: Use GitHub Issues for bug reports and feature requests
+- **Discussions**: Use GitHub Discussions for questions and ideas
+- **Security**: Report security issues privately to maintainers
+
+### 📋 **Review Process**
+
+1. **Automated Checks**: CI/CD pipeline runs tests
+2. **Code Review**: At least one maintainer must approve
+3. **Security Review**: Check for sensitive data exposure
+4. **Documentation Review**: Ensure docs are updated
+5. **Final Approval**: Maintainer merges the PR
+
+### 🎯 **Areas for Contribution**
+
+#### **High Priority**
+- Performance optimizations
+- Additional technical indicators
+- Enhanced error handling
+- Improved documentation
+- Test coverage improvements
+
+#### **Medium Priority**
+- New sentiment analysis sources
+- Additional ML models
+- UI/UX improvements
+- Mobile app development
+- API endpoint development
+
+#### **Low Priority**
+- Cosmetic improvements
+- Additional examples
+- Translation support
+- Integration with other platforms
+
+### 📄 **License**
+
+By contributing to this project, you agree that your contributions will be licensed under the MIT License.
+
+---
+
+**Thank you for contributing to the Stock Price Prediction System!** 🚀
+
+Your contributions help make this project better for everyone in the trading and investment community.
